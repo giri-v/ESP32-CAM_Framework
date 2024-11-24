@@ -26,7 +26,12 @@ extern "C"
 
 #include <esp_camera.h>
 
+#define PIN_FLASHLIGHT 4
+
 // CAMERA_MODEL_AI_THINKER
+#define CAMERA_MODEL_AI_THINKER // Has PSRAM
+
+
 #define PWDN_GPIO_NUM 32
 #define RESET_GPIO_NUM -1
 #define XCLK_GPIO_NUM 0
@@ -99,7 +104,7 @@ MqttStream mqttStream = MqttStream(&client);
 char topic[128] = "log/foo";
 #endif
 
-int chip_id = ESP.getEfuseMac();
+//int chip_id = ESP.getEfuseMac();
 
 // **************** Debug Parameters ************************
 String methodName = "";
@@ -161,6 +166,8 @@ int tempImageCounter = 0;
 
 bool bcameraReady = false;
 bool bcaptureFailed = false;
+
+bool bFlash = false;
 
 // put function declarations here:
 void loadPrefs();
@@ -317,23 +324,38 @@ int getImageSize(char *fn)
 // Capture Photo and Save it to SPIFFS
 int captureImagetoFile()
 {
+  String oldMethodName = methodName;
+  methodName = "captureImagetoFile()";
+  Log.verboseln("Entering...");
+
   camera_fb_t *fb = NULL; // pointer
   bool ok = 0;            // Boolean indicating if the picture has been taken correctly
 
   if (!bcameraReady)
   {
     Log.warningln("Camera Not Ready. Can't capture image!!!");
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
     return -1;
   }
 
   // Take a photo with the camera
-  Log.infoln("Taking a photo...");
+  Log.infoln("Capturing image to file");
+
+  //if (bFlash)
+    digitalWrite(PIN_FLASHLIGHT, HIGH);
+
+
 
   fb = esp_camera_fb_get();
   if (!fb)
   {
     Log.errorln("Camera capture failed");
     bcaptureFailed = true;
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
     return -1;
   }
 
@@ -356,60 +378,109 @@ int captureImagetoFile()
   {
     file.write(fb->buf, fb->len); // payload (image), payload length
     fs = file.size();
-    Log.infoln("%s %i kB ", fn, fs / 8000.0);
+    Log.infoln("%s %i bytes ", fn, fs );
   }
   // Close the file
   file.close();
   esp_camera_fb_return(fb);
+  digitalWrite(PIN_FLASHLIGHT, LOW);
 
   // check if file has been correctly saved in SPIFFS
-  if (getImageSize(fn) != fs)
+  int checkSize = getImageSize(fn);
+  if (checkSize != fs)
   {
-    Log.errorln("File not saved correctly. Erasing file!!!");
-    fs = 0;
-    SPIFFS.remove(fn);
-    tempImageCounter--;
+    //Log.errorln("File not saved correctly. Erasing file!!!");
+    //fs = 0;
+    //SPIFFS.remove(fn);
+    //tempImageCounter--;
   }
 
-  Log.infoln("File saved successfully.");
+  Log.infoln("File saved successfully. %i", checkSize);
+  Log.verboseln("Exiting...");
+  methodName = oldMethodName;
+
   return fs;
 }
 
-int sendImage(File file)
+void sendImage(char *filename)
 {
+  String oldMethodName = methodName;
+  methodName = "sendImage(char *filename)";
+  Log.verboseln("Entering...");
 
-  return -1;
+  File file = SPIFFS.open(filename, "r");
+
+  if (!file)
+  {
+    Serial.println("Failed to open file for reading");
+    return;
+  }
+
+  size_t fileSize = file.size();
+  char *buffer = new char[fileSize + 1]; // +1 for null terminator
+
+  if (file.readBytes(buffer, fileSize) != fileSize)
+  {
+    Serial.println("Error reading file");
+    delete[] buffer;
+    return;
+  }
+
+  buffer[fileSize] = '\0'; // Add null terminator
+
+  mqttClient.publish("mbmon/snapshot", 1, false, buffer);
+ 
+
+  delete[] buffer; // Free memory when done
+  file.close();
+
+  Log.verboseln("Exiting...");
+  methodName = oldMethodName;
 }
 
 void sendAllImages()
 {
+  String oldMethodName = methodName;
+  methodName = "sendAllImages()";
+  Log.verboseln("Entering...");
 
   // Photo file name
   char fn[40] = "/images/temp.jpg";
   int fs = 0;
 
+int imgCount = 0;
+
   while (SPIFFS.exists(fn))
   {
-    File file = SPIFFS.open(fn);
-    fs = file.size();
-    int sentBytes = sendImage(file);
+    sendImage(fn);
+    imgCount++;
     SPIFFS.remove(fn);
     sprintf(fn, tempImageName, tempImageCounter++);
   }
+  Log.infoln("Sending %i images.", imgCount);
+  
+  Log.verboseln("Exiting...");
+  methodName = oldMethodName;
 }
 
 void captureAndSendImage()
 {
-  int captureImagetoFile();
+  String oldMethodName = methodName;
+  methodName = "captureAndSendImage()";
+  Log.verboseln("Entering...");
+
+  captureImagetoFile();
 
   if (mqttClient.connected())
   {
-    // mqttClient.publish
     sendAllImages();
   }
   else
   {
   }
+
+  Log.verboseln("Exiting...");
+  methodName = oldMethodName;
 }
 
 void connectToWifi()
@@ -754,6 +825,10 @@ void logMACAddress(uint8_t baseMac[6])
 
 void initializeCamera()
 {
+  String oldMethodName = methodName;
+  methodName = "initializeCamera()";
+  Log.verboseln("Entering...");
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -779,12 +854,14 @@ void initializeCamera()
   // init with high specs to pre-allocate larger buffers
   if (psramFound())
   {
+    Log.infoln("Found PSRAM. Using FRAMESIZE_SVGA.");
     config.frame_size = FRAMESIZE_SVGA;
     config.jpeg_quality = 10; // 0-63 lower number means higher quality
     config.fb_count = 2;
   }
   else
   {
+    Log.infoln("Could not find PSRAM. Using FRAMESIZE_CIF.");
     config.frame_size = FRAMESIZE_CIF;
     config.jpeg_quality = 12; // 0-63 lower number means higher quality
     config.fb_count = 1;
@@ -799,7 +876,11 @@ void initializeCamera()
   else
   {
     bcameraReady = true;
+    Log.infoln("Camera initialized successfully.");
   }
+
+  Log.verboseln("Exiting...");
+  methodName = oldMethodName;
 }
 
 void print_wakeup_reason()
@@ -1019,13 +1100,14 @@ void setup()
   bootCount++;
   wakeup_reason = esp_sleep_get_wakeup_cause();
   reset_reason = esp_reset_reason();
-  // initFS();
+  initFS();
 
   // Add some custom code here
   initAppStrings();
 
   // Configure Hardware
   Log.infoln("Configuring hardware.");
+  pinMode(PIN_FLASHLIGHT, OUTPUT);
   // pinMode(DOORBELL_PIN, INPUT);
   // attachInterrupt(digitalPinToInterrupt(DOORBELL_PIN), doorbellPressed, FALLING);
 
@@ -1063,6 +1145,8 @@ void setup()
 
   initializeCamera();
 
+  captureAndSendImage();
+
   Log.verboseln("Exiting...");
   methodName = oldMethodName;
 }
@@ -1076,6 +1160,7 @@ void loop()
   {
     logTimestamp();
   }
+
 }
 
 // put function definitions here:
