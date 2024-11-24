@@ -15,42 +15,35 @@ extern "C"
 #include <Preferences.h>
 #include <SPI.h>
 
+#include <FS.h>
 #ifndef LittleFS
 #include <SPIFFS.h>
 #else
 #include <LittleFS.h>
 #endif
+
 #include <Update.h>
 
-#include <TFT_eSPI.h>
-/*
-#define ST7796_DRIVER
-#define TFT_WIDTH 320
-#define TFT_HEIGHT 480
-#define TFT_MISO 12
-#define TFT_MOSI 13
-#define TFT_SCLK 14
-#define TFT_CS -1
-#define TFT_DC 0
-#define TFT_RST -1
-*/
-/*
-#define ILI9341_DRIVER
-#define TFT_WIDTH 240
-#define TFT_HEIGHT 320
-#define TFT_BL 21             // LED back-light control pin
-#define TFT_BACKLIGHT_ON HIGH // Level to turn ON back-light (HIGH or LOW)
+#include <esp_camera.h>
 
-#define TFT_MISO 12
-#define TFT_MOSI 13 // In some display driver board, it might be written as "SDA" and so on.
-#define TFT_SCLK 14
-#define TFT_CS 15  // Chip select control pin
-#define TFT_DC 2   // Data Command control pin
-#define TFT_RST 12 // Reset pin (could connect to Arduino RESET pin)
-#define TFT_BL 21  // LED back-light
+// CAMERA_MODEL_AI_THINKER
+#define PWDN_GPIO_NUM 32
+#define RESET_GPIO_NUM -1
+#define XCLK_GPIO_NUM 0
+#define SIOD_GPIO_NUM 26
+#define SIOC_GPIO_NUM 27
 
-#define TOUCH_CS 33 // Chip select pin (T_CS) of touch screen
-*/
+#define Y9_GPIO_NUM 35
+#define Y8_GPIO_NUM 34
+#define Y7_GPIO_NUM 39
+#define Y6_GPIO_NUM 36
+#define Y5_GPIO_NUM 21
+#define Y4_GPIO_NUM 19
+#define Y3_GPIO_NUM 18
+#define Y2_GPIO_NUM 5
+#define VSYNC_GPIO_NUM 25
+#define HREF_GPIO_NUM 23
+#define PCLK_GPIO_NUM 22
 
 #include <HTTPClient.h>
 #include <AsyncMqttClient.h>
@@ -106,8 +99,6 @@ MqttStream mqttStream = MqttStream(&client);
 char topic[128] = "log/foo";
 #endif
 
-TFT_eSPI tft = TFT_eSPI(); // Create object "tft"
-
 int chip_id = ESP.getEfuseMac();
 
 // **************** Debug Parameters ************************
@@ -121,6 +112,9 @@ int volume = 50; // Volume is %
 int bootCount = 0;
 esp_sleep_wakeup_cause_t wakeup_reason;
 esp_reset_reason_t reset_reason;
+esp_chip_info_t chip_info;
+esp_chip_model_t chip_model;
+
 int maxOtherIndex = -1;
 
 Preferences preferences;
@@ -136,20 +130,17 @@ const char *localTZ = "PST8PDT,M3.2.0/2:00:00,M11.1.0/2:00:00";
 String hostname = HOSTNAME;
 
 char ipAddress[100];
-char port[25];
+IPAddress deviceIP;
 uint8_t macAddress[] = {0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x66}; // TODO: make this a meaningful default
-uint8_t wifiSTAMACAddress[] = {0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x66};
-uint8_t wifiAPMACAddress[] = {0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x66};
-uint8_t btMACAddress[] = {0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x66};
-uint8_t ethMACAddress[] = {0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x66};
 
 AsyncMqttClient mqttClient;
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
 TimerHandle_t checkFWUpdateTimer;
 TimerHandle_t appIDWaitTimer;
-// WiFiEventHandler wifiConnectHandler;
-// WiFiEventHandler wifiDisconnectHandler;
+
+const int timerInterval = 30000;  // time between each HTTP POST image
+unsigned long previousMillis = 0; // last time image was sent
 
 // MQTT Topics (25 character limit per level)
 char onlineTopic[100];
@@ -159,11 +150,17 @@ char snapshotTopic[100];
 
 char appSubTopic[100];
 
+// Firmware Update Parameters
 const char *remoteUpdateUrl = "http://192.168.0.12/internal/iot";
-
 char fwUpdateUrl[200];
 char latestFWImageIndexUrl[200];
 char latestFirmwareFileName[100];
+
+const char *tempImageName = "/images/temp%i.jpg";
+int tempImageCounter = 0;
+
+bool bcameraReady = false;
+bool bcaptureFailed = false;
 
 // put function declarations here:
 void loadPrefs();
@@ -289,32 +286,6 @@ void initFS()
 #endif
 }
 
-void setupDisplay()
-{
-  String oldMethodName = methodName;
-  methodName = "setupDisplay()";
-  Log.verboseln("Entering");
-
-  Log.infoln("Setting up display.");
-  tft.init();
-  tft.setRotation(2);
-  tft.fillScreen(TFT_BLACK);
-  // delayMicroseconds(1000);
-  tft.fillScreen(TFT_BLUE);
-  // delayMicroseconds(1000);
-  tft.fillScreen(TFT_BLACK);
-
-  // tft.setFont(baseFont);
-
-  tft.setTextFont(7);
-  tft.setTextSize(1);
-
-  tft.setTextDatum(BC_DATUM);
-
-  Log.verboseln("Exiting...");
-  methodName = oldMethodName;
-}
-
 void initAppStrings()
 {
   sprintf(onlineTopic, "%s/online", appName);
@@ -322,7 +293,7 @@ void initAppStrings()
   sprintf(idTopic, "%s/id", appName);
 
   sprintf(appSubTopic, "%s/#", appName);
-  sprintf(fwUpdateUrl, "%s/%s/firmware",remoteUpdateUrl, appName);
+  sprintf(fwUpdateUrl, "%s/%s/firmware", remoteUpdateUrl, appName);
 
   sprintf(latestFWImageIndexUrl, "%s/%s/firmware/id", remoteUpdateUrl, appName);
 }
@@ -334,6 +305,111 @@ void initAppInstanceStrings()
   sprintf(idTopic, "%s/id", appName);
 
   sprintf(appSubTopic, "%s/#", appName);
+}
+
+// Check if photo capture was successful
+int getImageSize(char *fn)
+{
+  File f_pic = SPIFFS.open(fn);
+  return f_pic.size();
+}
+
+// Capture Photo and Save it to SPIFFS
+int captureImagetoFile()
+{
+  camera_fb_t *fb = NULL; // pointer
+  bool ok = 0;            // Boolean indicating if the picture has been taken correctly
+
+  if (!bcameraReady)
+  {
+    Log.warningln("Camera Not Ready. Can't capture image!!!");
+    return -1;
+  }
+
+  // Take a photo with the camera
+  Log.infoln("Taking a photo...");
+
+  fb = esp_camera_fb_get();
+  if (!fb)
+  {
+    Log.errorln("Camera capture failed");
+    bcaptureFailed = true;
+    return -1;
+  }
+
+  // Photo file name
+  char fn[40] = "/images/temp.jpg";
+  int fs = 0;
+  while (SPIFFS.exists(fn))
+  {
+    sprintf(fn, tempImageName, tempImageCounter++);
+  }
+  File file = SPIFFS.open(fn, FILE_WRITE);
+  Log.infoln("Picture file name: %s", fn);
+
+  // Insert the data in the photo file
+  if (!file)
+  {
+    Log.errorln("Failed to open file in writing mode!!!!");
+  }
+  else
+  {
+    file.write(fb->buf, fb->len); // payload (image), payload length
+    fs = file.size();
+    Log.infoln("%s %i kB ", fn, fs / 8000.0);
+  }
+  // Close the file
+  file.close();
+  esp_camera_fb_return(fb);
+
+  // check if file has been correctly saved in SPIFFS
+  if (getImageSize(fn) != fs)
+  {
+    Log.errorln("File not saved correctly. Erasing file!!!");
+    fs = 0;
+    SPIFFS.remove(fn);
+    tempImageCounter--;
+  }
+
+  Log.infoln("File saved successfully.");
+  return fs;
+}
+
+int sendImage(File file)
+{
+
+  return -1;
+}
+
+void sendAllImages()
+{
+
+  // Photo file name
+  char fn[40] = "/images/temp.jpg";
+  int fs = 0;
+
+  while (SPIFFS.exists(fn))
+  {
+    File file = SPIFFS.open(fn);
+    fs = file.size();
+    int sentBytes = sendImage(file);
+    SPIFFS.remove(fn);
+    sprintf(fn, tempImageName, tempImageCounter++);
+  }
+}
+
+void captureAndSendImage()
+{
+  int captureImagetoFile();
+
+  if (mqttClient.connected())
+  {
+    // mqttClient.publish
+    sendAllImages();
+  }
+  else
+  {
+  }
 }
 
 void connectToWifi()
@@ -353,7 +429,7 @@ void connectToMqtt()
   String oldMethodName = methodName;
   methodName = "connectToMqtt()";
 
-  Log.infoln("Connecting...");
+  Log.infoln("Connecting to MQTT Broker...");
   mqttClient.connect();
 
   methodName = oldMethodName;
@@ -367,22 +443,13 @@ void onWifiConnect(const WiFiEvent_t &event)
 
   (void)event;
 
-  Log.infoln("Connected to Wi-Fi. IP address: %p", WiFi.localIP());
+  deviceIP = WiFi.localIP();
+  Log.infoln("Connected to Wi-Fi. IP address: %p", deviceIP);
+
   Log.infoln("Connecting to NTP Server...");
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  // configTime(localTZ, ntpServer);
-  Log.infoln("Connected to NTP Server!");
-  time_t rawtime;
-  struct tm *timeinfo;
-  time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  char tim[20];
-  strftime(tim, 20, "%d/%m/%Y %H:%M:%S", timeinfo);
+  // Log.infoln("Connected to NTP Server!");
 
-  // bForecastChanged = true;
-  Log.infoln("Local Time: %s", tim);
-
-  Log.infoln("Connecting to MQTT Broker...");
   connectToMqtt();
 
   Log.verboseln("Exiting...");
@@ -481,20 +548,10 @@ void onMqttConnect(bool sessionPresent)
   Log.infoln("Connected to MQTT broker: %p , port: %d", MQTT_HOST, MQTT_PORT);
   Log.infoln("Session present: %T", sessionPresent);
 
-  uint16_t packetIdSub1 = mqttClient.subscribe(appSubTopic, 2);
-  if (packetIdSub1 > 0)
-    Log.infoln("Subscribing to %s at QoS 2, packetId: %u", appSubTopic, packetIdSub1);
-  else
-    Log.errorln("Failed to subscribe to %s!!!", appSubTopic);
+  sendAllImages();
+  
+  captureAndSendImage();
 
-  if (appID > -1)
-    mqttPublishID();
-  else
-  {
-    // mqttClient.publish(idTopic, 1, false);
-    Log.infoln("Don't have appID yet so nothing to publish to MQTT.");
-    // wichimeIDWaitTimer.once_ms(10000, registerMQTTTopics);
-  }
   Log.verboseln("Exiting...");
   methodName = oldMethodName;
 }
@@ -560,7 +617,7 @@ void doUpdateFirmware(char *fileName)
   Log.verboseln("Entering...");
 
   File file = SPIFFS.open(fileName);
-  
+
   if (!file)
   {
     Log.errorln("Failed to open file for reading");
@@ -595,7 +652,6 @@ void doUpdateFirmware(char *fileName)
   }
 
   file.close();
-
 
   Log.infoln("Reset in 2 seconds...");
   delay(2000);
@@ -696,17 +752,54 @@ void logMACAddress(uint8_t baseMac[6])
   Log.infoln(mac);
 }
 
-void readMACs()
+void initializeCamera()
 {
-  // Get MAC address of the WiFi station interface
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
 
-  esp_read_mac(wifiSTAMACAddress, ESP_MAC_WIFI_STA);
-  // Get the MAC address of the Wi-Fi AP interface
-  esp_read_mac(wifiAPMACAddress, ESP_MAC_WIFI_SOFTAP);
-  // Get the MAC address of the Bluetooth interface
-  esp_read_mac(btMACAddress, ESP_MAC_BT);
-  // Get the MAC address of the Ethernet interface
-  esp_read_mac(ethMACAddress, ESP_MAC_ETH);
+  // init with high specs to pre-allocate larger buffers
+  if (psramFound())
+  {
+    config.frame_size = FRAMESIZE_SVGA;
+    config.jpeg_quality = 10; // 0-63 lower number means higher quality
+    config.fb_count = 2;
+  }
+  else
+  {
+    config.frame_size = FRAMESIZE_CIF;
+    config.jpeg_quality = 12; // 0-63 lower number means higher quality
+    config.fb_count = 1;
+  }
+
+  // camera init
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK)
+  {
+    Log.errorln("Camera init failed with error 0x%x", err);
+  }
+  else
+  {
+    bcameraReady = true;
+  }
 }
 
 void print_wakeup_reason()
@@ -734,7 +827,6 @@ void print_wakeup_reason()
     break;
   }
 }
-
 
 void setAppID()
 {
@@ -872,6 +964,7 @@ void checkFWUpdate()
   methodName = oldMethodName;
 }
 
+
 IRAM_ATTR void interruptService()
 {
 }
@@ -880,6 +973,8 @@ void setup()
 {
   String oldMethodName = methodName;
   methodName = "setup()";
+
+  bcameraReady = false;
 
   Serial.begin(115200);
   Serial.println("Starting....");
@@ -912,6 +1007,7 @@ void setup()
   Log.begin(LOG_LEVEL, &TLogPlus::Log, false);
   Log.setPrefix(printTimestamp);
 
+  // esp_chip_info()
   esp_base_mac_addr_get(macAddress);
   logMACAddress(macAddress);
 
@@ -924,8 +1020,6 @@ void setup()
   wakeup_reason = esp_sleep_get_wakeup_cause();
   reset_reason = esp_reset_reason();
   // initFS();
-
-  setupDisplay();
 
   // Add some custom code here
   initAppStrings();
@@ -966,6 +1060,8 @@ void setup()
   }
 
   connectToWifi();
+
+  initializeCamera();
 
   Log.verboseln("Exiting...");
   methodName = oldMethodName;
