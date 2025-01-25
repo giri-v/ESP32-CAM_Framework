@@ -38,7 +38,7 @@ extern "C"
 #define LONGITUDE -121.8853892
 
 #endif // SECRETS_H
-
+#include "OV2640.h"
 #include <WiFi.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -47,7 +47,7 @@ extern "C"
 
 #include <Update.h>
 
-#include <OV2640.h>
+
 
 #include "soc/rtc_cntl_reg.h"
 
@@ -267,9 +267,9 @@ void drawString(String text, int x, int y, int font_size, int color, int bg_colo
 #pragma region SD Card Functions
 
 #ifdef USE_SD_CARD
-#include <SD.h>
-
-#define SD_CS 5
+#include <SD_MMC.h>
+#define SD SD_MMC
+//#define SD_CS 5
 
 // printDirectory
 void printDirectory(File dir, int numTabs)
@@ -321,7 +321,7 @@ void initSD()
         return;
     }
 #else
-    if (!SD.begin(SD_CS))
+    if (!SD.begin())
     {
         Log.errorln("SD Card Mount Failed");
         return;

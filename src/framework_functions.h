@@ -115,12 +115,17 @@ void initCAM()
         cconfig.jpeg_quality = 12;
         cconfig.fb_count = 1;
     }
+    
     if (PIN_FLASH_LED > -1)
     {
         pinMode(PIN_FLASH_LED, OUTPUT);
         setflash(0);
     }
-    cam.init(cconfig);
+
+    if (cam.init(cconfig) != 0)
+        Log.errorln("Failed to configure camera!");
+    else
+        Log.infoln("Camera configuration complete.");
 }
 
 void doUpdateFirmware(char *fileName)
@@ -682,10 +687,6 @@ void framework_setup()
     // Framework: Setting up logging
     Serial.begin(115200);
     Serial.println("Starting....");
-
-#ifdef TELNET
-    Log.addPrintStream(std::make_shared<TelnetSerialStream>(telnetSerialStream));
-#endif
 
 #ifdef WEBSTREAM
     Log.addPrintStream(std::make_shared<WebSerialStream>(webSerialStream));

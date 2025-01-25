@@ -12,11 +12,9 @@
 #include "web_server.h"
 #endif
 
-
 // ********* Framework App Parameters *****************
 
 int appVersion = 1;
-
 
 bool isFirstDraw = true;
 
@@ -27,8 +25,6 @@ typedef void (*mqttMessageHandler)(char *topic, char *payload,
                                    size_t len, size_t index, size_t total);
 
 // ********** App Global Variables **********
-
-
 
 // Should be /internal/iot/firmware
 const char *firmwareUrl = "/firmware/";
@@ -45,6 +41,8 @@ int appNameFontSize = 56;
 int friendlyNameFontSize = 24;
 int appInstanceIDFontSize = 18;
 int timeFontSize = 128;
+
+bool rtspServerRunning = false;
 
 // ********** Possible Customizations Start ***********
 
@@ -72,7 +70,6 @@ bool checkGoodTime();
 bool getNewTime();
 void drawSplashScreen();
 void drawTime();
-
 
 //////////////////////////////////////////
 //// Customizable Functions
@@ -138,8 +135,53 @@ void initAppStrings()
     sprintf(appSubTopic, "%s/#", appName);
 }
 
+void initRTSPServer()
+{
+    String oldMethodName = methodName;
+    methodName = "initRTSPServer()";
+    Log.verboseln("Entering...");
 
+    Log.infoln("Starting RTSP Server.");
+    rtspServer.begin();
+    rtspServerRunning = true;
 
+    streamer = new OV2640Streamer(&cam);
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
+}
+
+void handleRTSP_loop()
+{
+    uint32_t msecPerFrame = 100;
+    static uint32_t lastimage = millis();
+    // If we have an active client connection, just service that until gone
+    streamer->handleRequests(0); // we don't use a timeout here,
+    // instead we send only if we have new enough frames
+    uint32_t now = millis();
+    if (streamer->anySessions())
+    {
+        if (now > lastimage + msecPerFrame || now < lastimage)
+        { // handle clock rollover
+            streamer->streamImage(now);
+            lastimage = now;
+            // check if we are overrunning our max frame rate
+            now = millis();
+            if (now > lastimage + msecPerFrame)
+            {
+                Log.warningln("warning exceeding max frame rate of %d ms", now - lastimage);
+            }
+        }
+    }
+    // rtsp client / server
+    WiFiClient rtspClient = rtspServer.accept();
+    if (rtspClient)
+    {
+        Log.infoln("Connecting RTSP Client: %s", rtspClient.remoteIP());
+
+        streamer->addSession(&rtspClient);
+    }
+}
 
 void ProcessWifiConnectTasks()
 {
@@ -147,10 +189,14 @@ void ProcessWifiConnectTasks()
     methodName = "ProcessAppWifiConnectTasks()";
     Log.verboseln("Entering...");
 
-
 #ifdef USE_WEB_SERVER
     initWebServer();
 #endif
+
+#ifdef USE_RTSP
+    initRTSPServer();
+#endif
+
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
@@ -387,7 +433,6 @@ void drawTime()
 
 #endif
 
-
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
@@ -409,6 +454,7 @@ void app_setup()
     Log.infoln("Configuring hardware.");
     // pinMode(DOORBELL_PIN, INPUT);
     // attachInterrupt(digitalPinToInterrupt(DOORBELL_PIN), doorbellPressed, FALLING);
+    // create a rising interrupt on GPIO 13
 
     File root = SD.open("/");
     if (!root)
@@ -419,8 +465,6 @@ void app_setup()
     {
         printDirectory(root, 0);
     }
-
-
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
@@ -434,6 +478,8 @@ void app_setup()
 
 void app_loop()
 {
+    if (rtspServerRunning)
+        handleRTSP_loop();
 
     if ((millis() % 1000) == 0)
     {
