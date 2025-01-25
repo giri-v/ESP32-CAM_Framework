@@ -42,13 +42,14 @@ void framework_setup();
 void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason);
 void logResetReason(esp_reset_reason_t reset_reason);
 void framework_loop();
+void setflash(byte state);
+void initCAM();
 
-void reboot(const char* message)
+void reboot(const char *message)
 {
     Log.infoln("Rebooting ESP32: %s", message);
     ESP.restart();
 }
-
 
 void connectToWifi()
 {
@@ -87,6 +88,41 @@ void resetWifiFailCount(TimerHandle_t xTimer)
     methodName = oldMethodName;
 }
 
+void setflash(byte state)
+{
+    if (PIN_FLASH_LED > -1)
+    {
+        digitalWrite(PIN_FLASH_LED, state);
+    }
+}
+
+void initCAM()
+{
+    camera_config_t cconfig;
+    cconfig = esp32cam_aithinker_config;
+    if (psramFound())
+    {
+        cconfig.frame_size = RESOLUTION; // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
+        cconfig.jpeg_quality = QUALITY;
+        cconfig.fb_count = 2;
+    }
+    else
+    {
+        if (RESOLUTION > FRAMESIZE_SVGA)
+        {
+            cconfig.frame_size = FRAMESIZE_SVGA;
+        }
+        cconfig.jpeg_quality = 12;
+        cconfig.fb_count = 1;
+    }
+    if (PIN_FLASH_LED > -1)
+    {
+        pinMode(PIN_FLASH_LED, OUTPUT);
+        setflash(0);
+    }
+    cam.init(cconfig);
+}
+
 void doUpdateFirmware(char *fileName)
 {
     String oldMethodName = methodName;
@@ -95,7 +131,7 @@ void doUpdateFirmware(char *fileName)
 
     String fsFileName = "/" + String(fileName);
 
-    File file = SPIFFS.open(fsFileName);
+    File file = LittleFS.open(fsFileName);
 
     if (!file)
     {
@@ -152,7 +188,7 @@ int getlatestFirmware(char *fileName)
 
     String fsFileName = "/" + String(fileName);
 
-    File f = SPIFFS.open(fsFileName, FILE_WRITE);
+    File f = LittleFS.open(fsFileName, FILE_WRITE);
     if (f)
     {
         Log.verboseln("[HTTP] begin...");
@@ -642,6 +678,7 @@ void logMACAddress(uint8_t baseMac[6])
 
 void framework_setup()
 {
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
     // Framework: Setting up logging
     Serial.begin(115200);
     Serial.println("Starting....");
@@ -701,6 +738,8 @@ void framework_setup()
     {
         Log.infoln("AppInstanceID: %d", appInstanceID);
     }
+
+    initCAM();
 
     initFS();
 

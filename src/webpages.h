@@ -17,7 +17,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <h1>%APP_NAME% Admin page</h1>
   </header>
   <p>Firmware: %FIRMWARE%</p>
-  <p>Free Storage: <span id="freespiffs">%FREESPIFFS%</span> | Used Storage: <span id="usedspiffs">%USEDSPIFFS%</span> | Total Storage: <span id="totalspiffs">%TOTALSPIFFS%</span></p>
+  <p>Free Storage: <span id="freespiffs">%FREESPACE%</span> | Used Storage: <span id="usedspiffs">%USEDSPACE%</span> | Total Storage: <span id="totalspiffs">%TOTALSPACE%</span></p>
   <p>
   <button onclick="logoutButton()">Logout</button>
   <button onclick="rebootButton()">Reboot</button>
@@ -46,7 +46,7 @@ function listFilesButton() {
   xmlhttp=new XMLHttpRequest();
   xmlhttp.open("GET", "/listfiles", false);
   xmlhttp.send();
-  document.getElementById("detailsheader").innerHTML = "<h3>SPIFFS Files<h3>";
+  document.getElementById("detailsheader").innerHTML = "<h3>LittleFS Files<h3>";
   document.getElementById("details").innerHTML = xmlhttp.responseText;
 }
 function listSDFilesButton() {

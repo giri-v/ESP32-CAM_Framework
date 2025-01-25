@@ -39,14 +39,32 @@ extern "C"
 
 #endif // SECRETS_H
 
-
 #include <WiFi.h>
 #include <Preferences.h>
 #include <SPI.h>
 
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
 #include <Update.h>
+
+#include <OV2640.h>
+
+#include "soc/rtc_cntl_reg.h"
+
+OV2640 cam;
+#define RESOLUTION FRAMESIZE_UXGA // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
+#define QUALITY 10                // JPEG quality 10-63 (lower means better quality)
+#define PIN_FLASH_LED 4           // GPIO4 for AIThinker module, set to -1 if not needed!
+
+#ifdef USE_RTSP
+#define RTSP_PORT 554
+
+#include "OV2640Streamer.h"
+#include "CRtspSession.h"
+
+WiFiServer rtspServer(554);
+CStreamer *streamer;
+#endif
 
 #ifdef USE_WEB_SERVER
 #include <ESPAsyncWebServer.h>
@@ -93,12 +111,6 @@ char topic[128] = "log/foo";
 #define minimum(a, b) (((a) < (b)) ? (a) : (b))
 #define maximum(a, b) (((a) > (b)) ? (a) : (b))
 
-
-
-
-
-
-
 const char *appName = APP_NAME;
 const char *appSecret = APP_SECRET;
 #define FIRMWARE_VERSION "v0.0.1"
@@ -112,11 +124,8 @@ char friendlyName[100] = "NoNameSet";
 bool isFirstLoop = true;
 bool isGoodTime = false;
 
-
-
 // ********** Connectivity Parameters **********
 AsyncMqttClient mqttClient;
-
 
 int volume = 50; // Volume is %
 int bootCount = 0;
@@ -126,13 +135,10 @@ int maxOtherIndex = -1;
 bool shouldReboot = false;
 Preferences preferences;
 
-
 uint8_t macAddress[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
 
 // **************** Debug Parameters ************************
 String methodName = "";
-
 
 #pragma region Standard Helper Functions
 
@@ -181,10 +187,10 @@ String humanReadableSize(const size_t bytes)
 void initFS()
 {
 #ifndef LittleFS
-    // Initialize SPIFFS
-    if (!SPIFFS.begin(true))
+    // Initialize LittleFS
+    if (!LittleFS.begin(true))
     {
-        Log.errorln("An Error has occurred while mounting SPIFFS");
+        Log.errorln("An Error has occurred while mounting LittleFS");
         return;
     }
 #else
@@ -371,7 +377,7 @@ AudioOutputI2S *out;
 bool mp3Done = true;
 
 /// @fn void initAudioOutput()
-/// @brief The only function to 
+/// @brief The only function to
 
 void initAudioOutput()
 {
@@ -379,7 +385,6 @@ void initAudioOutput()
     out->SetOutputModeMono(true);
     out->SetGain(1.0);
 }
-
 
 void playMP3(char *filename)
 {
@@ -437,7 +442,7 @@ int32_t yPos = 0;
 void *pngOpen(const char *filename, int32_t *size)
 {
     Log.verboseln("Attempting to open %s\n", filename);
-    pngfile = SPIFFS.open(filename, "r");
+    pngfile = LittleFS.open(filename, "r");
     if (!pngfile)
         Log.errorln("Failed to open %s", filename);
     else
@@ -483,7 +488,7 @@ int32_t pngSeek(PNGFILE *page, int32_t position)
 
 /// @brief PNGDecoder Helper function to allow the decoder engine to draw a single line
 ///        of the image
-/// @param pDraw 
+/// @param pDraw
 void pngDraw(PNGDRAW *pDraw)
 {
     uint16_t lineBuffer[MAX_IMAGE_WIDTH];
@@ -516,7 +521,6 @@ void drawPNG(const char *filename, int x, int y)
         tft.endWrite();
     }
 }
-
 
 #ifdef USE_SD_CARD
 

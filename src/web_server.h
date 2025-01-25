@@ -21,7 +21,7 @@ String listFiles(fs::FS &fs, bool ishtml);
 String listFiles(fs::FS &fs, bool ishtml)
 {
     String returnText = "";
-    Log.infoln("Listing files stored on SPIFFS");
+    Log.infoln("Listing files stored on LittleFS");
     File root = fs.open("/");
     File foundfile = root.openNextFile();
     if (ishtml)
@@ -40,9 +40,9 @@ String listFiles(fs::FS &fs, bool ishtml)
             }
             else
             {
-            returnText += "<tr align='left'><td>" + String(foundfile.name()) + "</td><td>" + humanReadableSize(foundfile.size()) + "</td>";
-            returnText += "<td><button onclick=\"downloadDeleteButton(\'" + String(foundfile.name()) + "\', \'download\')\">Download</button>";
-            returnText += "<td><button onclick=\"downloadDeleteButton(\'" + String(foundfile.name()) + "\', \'delete\')\">Delete</button></tr>";
+                returnText += "<tr align='left'><td>" + String(foundfile.name()) + "</td><td>" + humanReadableSize(foundfile.size()) + "</td>";
+                returnText += "<td><button onclick=\"downloadDeleteButton(\'" + String(foundfile.name()) + "\', \'download\')\">Download</button>";
+                returnText += "<td><button onclick=\"downloadDeleteButton(\'" + String(foundfile.name()) + "\', \'delete\')\">Delete</button></tr>";
             }
         }
         else
@@ -60,8 +60,6 @@ String listFiles(fs::FS &fs, bool ishtml)
     return returnText;
 }
 
-
-
 // parses and processes webpages
 // if the webpage has %SOMETHING% or %SOMETHINGELSE% it will replace those strings with the ones defined
 String processor(const String &var)
@@ -71,19 +69,19 @@ String processor(const String &var)
         return FIRMWARE_VERSION;
     }
 
-    if (var == "FREESPIFFS")
+    if (var == "FREESPACE")
     {
-        return humanReadableSize((SPIFFS.totalBytes() - SPIFFS.usedBytes()));
+        return humanReadableSize((LittleFS.totalBytes() - LittleFS.usedBytes()));
     }
 
-    if (var == "USEDSPIFFS")
+    if (var == "USEDSPACE")
     {
-        return humanReadableSize(SPIFFS.usedBytes());
+        return humanReadableSize(LittleFS.usedBytes());
     }
 
-    if (var == "TOTALSPIFFS")
+    if (var == "TOTALSPACE")
     {
-        return humanReadableSize(SPIFFS.totalBytes());
+        return humanReadableSize(LittleFS.totalBytes());
     }
 
     if (var == "APP_NAME")
@@ -93,7 +91,6 @@ String processor(const String &var)
 
     return "Undefined!";
 }
-
 
 void initWebServer()
 {
@@ -107,23 +104,23 @@ void initWebServer()
     webServer.onFileUpload(handleUpload);
 
     // Handle static files
-    webServer.serveStatic("", SPIFFS, "/www/");
+    webServer.serveStatic("", LittleFS, "/www/");
 
     // visiting this page will cause you to be logged out
     webServer.on("/logout", HTTP_GET, [](AsyncWebServerRequest *request)
-               {
+                 {
     request->requestAuthentication();
     request->send(401); });
 
     // presents a "you are now logged out webpage
     webServer.on("/logged-out", HTTP_GET, [](AsyncWebServerRequest *request)
-               {
+                 {
     String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
     Log.infoln(logmessage.c_str());
     request->send_P(401, "text/html", logout_html, processor); });
 
     webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-               {
+                 {
                    String logmessage = "Client:" + request->client()->remoteIP().toString() + +" " + request->url();
 
                    if (checkUserWebAuth(request))
@@ -137,8 +134,7 @@ void initWebServer()
                        logmessage += " Auth: Failed";
                        Log.infoln(logmessage.c_str());
                        return request->requestAuthentication();
-                   }
-               });
+                   } });
 
     webServer.on("/simple.css", HTTP_GET, [](AsyncWebServerRequest *request)
                  {
@@ -173,12 +169,12 @@ void initWebServer()
     } });
 
     webServer.on("/listfiles", HTTP_GET, [](AsyncWebServerRequest *request)
-               {
+                 {
     String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
     if (checkUserWebAuth(request)) {
       logmessage += " Auth: Success";
       Log.infoln(logmessage.c_str());
-      request->send(200, "text/plain", listFiles(SPIFFS, true));
+      request->send(200, "text/plain", listFiles(LittleFS, true));
     } else {
       logmessage += " Auth: Failed";
       Log.infoln(logmessage.c_str());
@@ -201,7 +197,7 @@ void initWebServer()
 #endif
 
     webServer.on("/file", HTTP_GET, [](AsyncWebServerRequest *request)
-               {
+                 {
     String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
     if (checkUserWebAuth(request)) {
       logmessage += " Auth: Success";
@@ -213,7 +209,7 @@ void initWebServer()
 
         logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url() + "?name=" + String(fileName) + "&action=" + String(fileAction);
 
-        if (!SPIFFS.exists(fileName)) {
+        if (!LittleFS.exists(fileName)) {
             logmessage += " ERROR: file does not exist";
             Log.infoln(logmessage.c_str());
             request->send(400, "text/plain", "ERROR: file does not exist");
@@ -223,10 +219,10 @@ void initWebServer()
             if (strcmp(fileAction, "download") == 0)
             {
                 logmessage += " downloaded";
-                request->send(SPIFFS, fileName, "application/octet-stream");
+                request->send(LittleFS, fileName, "application/octet-stream");
           } else if (strcmp(fileAction, "delete") == 0) {
             logmessage += " deleted";
-            SPIFFS.remove(fileName);
+            LittleFS.remove(fileName);
             request->send(200, "text/plain", "Deleted File: " + String(fileName));
           } else {
             logmessage += " ERROR: invalid action param supplied";
@@ -279,7 +275,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
         {
             logmessage = "Upload Start: " + String(filename);
             // open the file on first call and store the file handle in the request object
-            request->_tempFile = SPIFFS.open("/" + filename, "w");
+            request->_tempFile = LittleFS.open("/" + filename, "w");
             Log.infoln(logmessage.c_str());
         }
 
