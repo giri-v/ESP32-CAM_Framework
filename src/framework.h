@@ -80,11 +80,6 @@ AsyncWebServer webServer(80);
 
 // using namespace TLogPlus;
 
-#ifdef TELNET_LOGGING
-#include <TelnetSerialStream.h>
-using namespace TLogPlusStream;
-TelnetSerialStream telnetSerialStream = TelnetSerialStream();
-#endif
 
 #ifdef WEBSTREAM_LOGGING
 #include <WebSerialStream.h>
