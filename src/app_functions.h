@@ -308,17 +308,21 @@ void initRTSPServer()
     methodName = "initRTSPServer()";
     Log.verboseln("Entering...");
 
-    Log.infoln("Starting RTSP Server.");
-    rtspServer.setTimeout(1);
-    rtspServer.begin();
-    rtspServerRunning = true;
+    initRTSP();
 
-    streamer = new OV2640Streamer(&cam);
+    /*
+        Log.infoln("Starting RTSP Server.");
+        rtspServer.setTimeout(1);
+        rtspServer.begin();
+        rtspServerRunning = true;
 
+        streamer = new OV2640Streamer(&cam);
+    */
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
 
+/*
 void handleRTSP_loop()
 {
     String oldMethodName = methodName;
@@ -357,6 +361,7 @@ void handleRTSP_loop()
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
+*/
 #endif
 
 void initAppStrings()
@@ -606,10 +611,12 @@ void app_loop()
         mailboxClosed();
 #endif
 
+/*
 #ifdef USE_RTSP
     if (rtspServerRunning)
         handleRTSP_loop();
 #endif
+*/
 
     if ((millis() % 1000) == 0)
     {
