@@ -22,6 +22,7 @@ TimerHandle_t wifiReconnectTimer;
 TimerHandle_t appInstanceIDWaitTimer;
 TimerHandle_t wifiFailCountTimer;
 
+void logESPChipInfo();
 void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason);
 void logResetReason(esp_reset_reason_t reset_reason);
 void logMACAddress(uint8_t baseMac[6]);
@@ -46,6 +47,17 @@ void setAppInstanceID();
 
 void framework_setup();
 void framework_loop();
+
+
+void logESPChipInfo()
+{
+    Log.infoln("##################################");
+    Log.infoln("Internal Total heap %d, internal Free Heap %d", ESP.getHeapSize(), ESP.getFreeHeap());
+    Log.infoln("SPIRam Total heap %d, SPIRam Free Heap %d", ESP.getPsramSize(), ESP.getFreePsram());
+    Log.infoln("ChipRevision %d, Cpu Freq %d, SDK Version %s", ESP.getChipRevision(), ESP.getCpuFreqMHz(), ESP.getSdkVersion());
+    Log.infoln("Flash Size %d, Flash Speed %d", ESP.getFlashChipSize(), ESP.getFlashChipSpeed());
+    Log.infoln("##################################\n\n");
+}
 
 void logMACAddress(uint8_t baseMac[6])
 {
@@ -743,6 +755,7 @@ void framework_setup()
     Log.begin(LOG_LEVEL, &TLogPlus::Log, false);
     Log.setPrefix(printTimestamp);
 
+    logESPChipInfo();
     esp_base_mac_addr_get(macAddress);
     logMACAddress(macAddress);
 

@@ -59,14 +59,6 @@ extern "C"
 //#include "driver/adc.h"
 #endif
 
-#ifdef USE_RTSP
-
-#include "OV2640Streamer.h"
-#include "CRtspSession.h"
-
-WiFiServer rtspServer(554);
-CStreamer *streamer;
-#endif
 
 #ifdef USE_WEB_SERVER
 #include <ESPAsyncWebServer.h>
@@ -793,5 +785,29 @@ int webGet(String req, String &res)
     return result;
 }
 #pragma endregion
+
+
+#pragma region RTSP Server
+
+#ifdef USE_RTSP
+
+#include "OV2640Streamer.h"
+#include "CRtspSession.h"
+
+WiFiServer rtspServer(554);
+CStreamer *streamer;
+
+typedef WiFiClient *SOCKET;
+typedef WiFiUDP *UDPSOCKET;
+typedef IPAddress IPADDRESS; // On linux use uint32_t in network byte order (per getpeername)
+typedef uint16_t IPPORT;     // on linux use network byte order
+
+#define NULLSOCKET NULL
+
+
+#endif
+
+#pragma endregion
+
 
 #endif // FRAMEWORK_H
