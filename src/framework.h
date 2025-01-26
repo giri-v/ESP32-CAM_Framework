@@ -52,7 +52,7 @@ extern "C"
 #include "soc/rtc_cntl_reg.h"
 
 OV2640 cam;
-#define RESOLUTION FRAMESIZE_UXGA // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
+#define RESOLUTION FRAMESIZE_XGA // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
 #define QUALITY 10                // JPEG quality 10-63 (lower means better quality)
 #define PIN_FLASH_LED 4           // GPIO4 for AIThinker module, set to -1 if not needed!
 
@@ -129,6 +129,8 @@ esp_reset_reason_t reset_reason;
 int maxOtherIndex = -1;
 bool shouldReboot = false;
 Preferences preferences;
+bool mqttConnected = false;
+bool wifiConnected = false;
 
 uint8_t macAddress[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
@@ -321,7 +323,7 @@ void initSD()
         return;
     }
 #else
-    if (!SD.begin())
+    if (!SD.begin("/sdcard", true))
     {
         Log.errorln("SD Card Mount Failed");
         return;

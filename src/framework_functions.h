@@ -118,8 +118,8 @@ void initCAM()
 
     if (PIN_FLASH_LED > -1)
     {
-        pinMode(PIN_FLASH_LED, OUTPUT);
-        setflash(0);
+        //pinMode(PIN_FLASH_LED, OUTPUT);
+        //setflash(0);
     }
 
     if (cam.init(cconfig) != 0)
@@ -313,6 +313,7 @@ void onWifiConnect(const WiFiEvent_t &event)
 
     (void)event;
 
+    wifiConnected = true;
     Log.infoln("Connected to Wi-Fi. IP address: %p", WiFi.localIP());
     Log.infoln("Connecting to NTP Server...");
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
@@ -344,7 +345,9 @@ void onWifiDisconnect(const WiFiEvent_t &event)
 
     (void)event;
 
+    wifiConnected = false;
     Log.infoln("Disconnected from Wi-Fi.");
+
     ProcessWifiDisconnectTasks();
     Log.infoln("Disconnecting mqttReconnectTimer");
     xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
@@ -441,6 +444,7 @@ void onMqttConnect(bool sessionPresent)
 
     Log.infoln("Connected to MQTT broker: %p , port: %d", MQTT_HOST, MQTT_PORT);
     Log.infoln("Session present: %T", sessionPresent);
+    mqttConnected = true;
 
     if (appInstanceID > -1)
     {
@@ -470,6 +474,8 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
     (void)reason;
 
     Log.warningln("Disconnected from MQTT.");
+
+    mqttConnected = false;
 
     ProcessMqttDisconnectTasks();
 
@@ -792,6 +798,7 @@ void framework_setup()
 void framework_loop()
 {
     TLogPlus::Log.loop();
+
 #ifdef USE_WEB_SERVER
     if (shouldReboot)
     {
@@ -804,6 +811,7 @@ void framework_loop()
     if (!mp3Done)
         playMP3Loop();
 #endif
+
 }
 
 void framework_start()

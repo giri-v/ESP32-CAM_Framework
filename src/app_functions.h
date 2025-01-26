@@ -20,10 +20,6 @@ bool isFirstDraw = true;
 
 // ********** Connectivity Parameters **********
 
-typedef void (*mqttMessageHandler)(char *topic, char *payload,
-                                   AsyncMqttClientMessageProperties properties,
-                                   size_t len, size_t index, size_t total);
-
 // ********** App Global Variables **********
 
 // Should be /internal/iot/firmware
@@ -36,16 +32,19 @@ char minute[3] = "00";
 char currentTime[6] = "00:00";
 char meridian[3] = "AM";
 
+TimerHandle_t mqttImageSendTimer;
+
 int baseFontSize = 72;
 int appNameFontSize = 56;
 int friendlyNameFontSize = 24;
 int appInstanceIDFontSize = 18;
 int timeFontSize = 128;
+int storedImageIndex = 0;
 
 bool rtspServerRunning = false;
 
 // ********** Possible Customizations Start ***********
-
+char imageTopic[75];
 int otherAppTopicCount = 0;
 char otherAppTopic[10][25];
 void (*otherAppMessageHandler[10])(char *topic, JsonDocument &doc);
@@ -70,6 +69,7 @@ bool checkGoodTime();
 bool getNewTime();
 void drawSplashScreen();
 void drawTime();
+void mqttPublishImage();
 
 //////////////////////////////////////////
 //// Customizable Functions
@@ -133,6 +133,73 @@ void setupDisplay()
 void initAppStrings()
 {
     sprintf(appSubTopic, "%s/#", appName);
+    sprintf(imageTopic, "%s/image", appName);
+}
+
+void mqttPublishImage()
+{
+    String oldMethodName = methodName;
+    methodName = "mqttPublishImage()";
+    Log.verboseln("Entering");
+
+    if (!mqttConnected)
+    {
+        /*
+        Log.infoln("MQTT not connected. Caching images to SD.");
+        char ifn[30];
+        sprintf(ifn, "/imgtemp/cap_%i.jpg", storedImageIndex);
+        Log.infoln("Opening %s", ifn);
+        File file = SD_MMC.open(ifn, FILE_WRITE);
+        if (file)
+        {
+            Log.infoln("Opened %s", ifn);
+            cam.run();
+            file.write(cam.getfb(), cam.getSize()); // payload (image), payload length
+            file.close();
+            Log.infoln("Saved image to: %s\n", ifn);
+            storedImageIndex++;
+        }
+        else
+        {
+            Log.errorln("Failed to open file (%s) in writing mode!!!", ifn);
+        }
+        */
+    }
+    else
+    {
+        if (storedImageIndex > 0)
+        {
+            Log.infoln("Sending cached images to MQTT.");
+            for (int i = 0; i < storedImageIndex; i++)
+            {
+                char ifn[30];
+                sprintf(ifn, "/imgtmp/cap_%i", i);
+                File file = SD.open(ifn, "r");
+                if (!file)
+                {
+                    Log.errorln("Failed to open file (%s) in reading mode!!!", ifn);
+                }
+
+                Log.verboseln("Reading file: %s", ifn);
+                int len = file.size();
+                char imgBuf[len + 1];
+                file.readBytes(imgBuf, len);
+                imgBuf[len + 1] = '\0';
+                file.close();
+                Log.verboseln("Sending via MQTT.");
+                int pubRes = mqttClient.publish(imageTopic, 1, false, imgBuf, len);
+                // delete[] imgBuf;
+            }
+        }
+
+        Log.infoln("Sending current image via MQTT.");
+        cam.run();
+
+        int pubRes = mqttClient.publish(imageTopic, 1, false, (char *)cam.getfb(), cam.getSize());
+    }
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
 }
 
 void initRTSPServer()
@@ -196,7 +263,6 @@ void ProcessWifiConnectTasks()
 #ifdef USE_RTSP
     initRTSPServer();
 #endif
-
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
@@ -456,6 +522,9 @@ void app_setup()
     // attachInterrupt(digitalPinToInterrupt(DOORBELL_PIN), doorbellPressed, FALLING);
     // create a rising interrupt on GPIO 13
 
+    mqttImageSendTimer = xTimerCreate("mqttImageSendTimer", pdMS_TO_TICKS(200), pdTRUE,
+                                      (void *)0, reinterpret_cast<TimerCallbackFunction_t>(mqttPublishImage));
+
     File root = SD.open("/");
     if (!root)
     {
@@ -465,6 +534,9 @@ void app_setup()
     {
         printDirectory(root, 0);
     }
+    root.close();
+
+    xTimerStart(mqttImageSendTimer, pdMS_TO_TICKS(5000));
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
