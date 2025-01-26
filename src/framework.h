@@ -15,7 +15,7 @@ extern "C"
 #include "freertos/timers.h"
 }
 
-
+#include <FS.h>
 
 #ifndef APP_NAME
 #define APP_NAME ESP32FWApp
@@ -40,7 +40,7 @@ extern "C"
 #define LONGITUDE -121.8853892
 
 #endif // SECRETS_H
-#include "OV2640.h"
+
 #include <WiFi.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -49,14 +49,11 @@ extern "C"
 
 #include <Update.h>
 
+#ifdef USE_DEEP_SLEEP
 #include "driver/rtc_io.h"
 #include "soc/rtc_cntl_reg.h"
-#include "driver/adc.h"
-
-OV2640 cam;
-#define RESOLUTION FRAMESIZE_XGA // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
-#define QUALITY 10                // JPEG quality 10-63 (lower means better quality)
-#define PIN_FLASH_LED 4           // GPIO4 for AIThinker module, set to -1 if not needed!
+//#include "driver/adc.h"
+#endif
 
 #ifdef USE_RTSP
 #define RTSP_PORT 554
@@ -208,6 +205,54 @@ void initFS()
 #endif
     Log.infoln("Flash FS available!");
 }
+
+#pragma endregion
+
+#pragma region ESP32-CAM
+
+#ifdef USE_ESP32_CAM
+#include "OV2640.h"
+
+OV2640 cam;
+#define RESOLUTION FRAMESIZE_XGA // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
+#define QUALITY 10               // JPEG quality 10-63 (lower means better quality)
+#define PIN_FLASH_LED 4          // GPIO4 for AIThinker module, set to -1 if not needed!
+
+void initCAM()
+{
+    camera_config_t cconfig;
+    cconfig = esp32cam_aithinker_config;
+    if (psramFound() && psramInit())
+    {
+        Log.infoln("Configuring CAM to use PSRAM");
+        cconfig.frame_size = RESOLUTION; // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
+        cconfig.jpeg_quality = QUALITY;
+        cconfig.fb_count = 2;
+    }
+    else
+    {
+        Log.warningln("PSRAM NOT FOUND. Configuring CAM normally.");
+        if (RESOLUTION > FRAMESIZE_SVGA)
+        {
+            cconfig.frame_size = FRAMESIZE_SVGA;
+        }
+        cconfig.jpeg_quality = 12;
+        cconfig.fb_count = 1;
+    }
+
+    if (PIN_FLASH_LED > -1)
+    {
+        // pinMode(PIN_FLASH_LED, OUTPUT);
+        // setflash(0);
+    }
+
+    if (cam.init(cconfig) != 0)
+        Log.errorln("Failed to configure camera!");
+    else
+        Log.infoln("Camera configuration complete.");
+}
+
+#endif
 
 #pragma endregion
 

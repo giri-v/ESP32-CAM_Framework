@@ -14,7 +14,7 @@
 
 #define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO) // 2 ^ GPIO_NUMBER in hex
 #define USE_EXT0_WAKEUP 1                       // 1 = EXT0 wakeup, 0 = EXT1 wakeup
-#define WAKEUP_GPIO GPIO_NUM_2                 // Only RTC IO are allowed - ESP32 Pin example
+#define WAKEUP_GPIO GPIO_NUM_2                  // Only RTC IO are allowed - ESP32 Pin example
 
 // ********* Framework App Parameters *****************
 
@@ -55,209 +55,98 @@ char otherAppTopic[10][25];
 void (*otherAppMessageHandler[10])(char *topic, JsonDocument &doc);
 
 void printTimestamp(Print *_logOutput, int x);
-void logTimestamp();
-void storePrefs();
 void loadPrefs();
-void ProcessMqttDisconnectTasks();
-void ProcessMqttConnectTasks();
-void ProcessWifiDisconnectTasks();
+void storePrefs();
 void ProcessWifiConnectTasks();
+void ProcessWifiDisconnectTasks();
+void ProcessMqttConnectTasks();
+void ProcessMqttDisconnectTasks();
 void appMessageHandler(char *topic, JsonDocument &doc);
+
 void app_loop();
 void app_setup();
 
-// Example functions
+#ifdef USE_GRAPHICS
+void drawSplashScreen();
 void setupDisplay();
+#endif
+
+#ifdef USE_RTSP
+void handleRTSP_loop();
+void initRTSPServer();
+#endif
+
+
+// Example functions
 void initAppStrings();
-void initWebServer();
 bool checkGoodTime();
 bool getNewTime();
-void drawSplashScreen();
 void drawTime();
 void mqttPublishImage();
 
-//////////////////////////////////////////
-//// Customizable Functions
-//////////////////////////////////////////
-void drawSplashScreen()
-{
-    String oldMethodName = methodName;
-    methodName = "drawSplashScreen()";
-    Log.verboseln("Entering");
+void setflash(byte state);
 
-    char showText[100];
-    if (appInstanceID < 0)
+void printTimestamp(Print *_logOutput, int x)
+{
+    char c[20];
+    time_t rawtime;
+    struct tm *timeinfo;
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+
+    if (timeinfo->tm_year == 70)
     {
-        sprintf(showText, "Configuring...");
+        sprintf(c, "%10lu ", millis());
     }
     else
     {
-        sprintf(showText, "Name: %s", friendlyName);
+        strftime(c, 20, "%Y%m%d %H:%M:%S", timeinfo);
     }
-    sprintf(showText, "Device ID: %i", appInstanceID);
-#ifdef USE_OPEN_FONT_RENDERER
-    drawString(appName, screenCenterX, screenCenterY, appNameFontSize);
-
-    drawString(showText, screenCenterX, screenCenterY + appNameFontSize / 2 + friendlyNameFontSize, friendlyNameFontSize);
-
-    drawString(showText, screenCenterX, tft.height() - appInstanceIDFontSize / 2, appInstanceIDFontSize);
-#endif
-
-    Log.verboseln("Exiting...");
-    methodName = oldMethodName;
+    _logOutput->print(c);
+    _logOutput->print(": ");
+    _logOutput->print(methodName);
+    _logOutput->print(": ");
 }
 
-void setupDisplay()
+void loadPrefs()
 {
     String oldMethodName = methodName;
-    methodName = "setupDisplay()";
-    Log.verboseln("Entering");
+    methodName = "loadPrefs()";
+    Log.verboseln("Entering...");
 
-    Log.infoln("Setting up display.");
-
-#ifdef USE_GRAPHICS
-    tft.init();
-    tft.setRotation(2);
-    tft.fillScreen(TFT_BLACK);
-#endif
-
-#ifdef USE_OPEN_FONT_RENDERER
-    ofr.setDrawer(tft);
-    ofr.loadFont(NotoSans_Bold, sizeof(NotoSans_Bold));
-    ofr.setFontColor(TFT_WHITE, TFT_BLACK);
-    ofr.setFontSize(baseFontSize);
-    ofr.setAlignment(Align::MiddleCenter);
-#endif
-
-    drawSplashScreen();
-
-    Log.verboseln("Exiting...");
-    methodName = oldMethodName;
-}
-
-void initAppStrings()
-{
-    sprintf(appSubTopic, "%s/#", appName);
-    sprintf(imageTopic, "%s/image", appName);
-}
-
-void mqttPublishImage()
-{
-    String oldMethodName = methodName;
-    methodName = "mqttPublishImage()";
-    Log.verboseln("Entering");
-
-    if (!mqttConnected)
+    bool doesExist = preferences.isKey("appInstanceID");
+    if (doesExist)
     {
-        Log.infoln("MQTT not connected. Caching images to SD.");
-        char ifn[30];
-        sprintf(ifn, "/imgtemp/cap_%i.jpg", storedImageIndex);
-        Log.infoln("Opening %s", ifn);
-        /*
-        File file = SD_MMC.open(ifn, FILE_WRITE);
-        if (file)
-        {
-            Log.infoln("Opened %s", ifn);
-            cam.run();
-            file.write(cam.getfb(), cam.getSize()); // payload (image), payload length
-            file.close();
-            Log.infoln("Saved image to: %s\n", ifn);
-            storedImageIndex++;
-        }
-        else
-        {
-            Log.errorln("Failed to open file (%s) in writing mode!!!", ifn);
-        }
-        */
+        Log.infoln("Loading settings.");
+        appInstanceID = preferences.getInt("AppInstanceID");
+        volume = preferences.getInt("Volume");
+        bootCount = preferences.getInt("BootCount");
+        preferences.getString("FriendlyName", friendlyName, 100); // 100 is the max length of the string
+        // enableSnapshot = preferences.getBool("EnableSnapshot");
     }
     else
     {
-        if (storedImageIndex > 0)
-        {
-            Log.infoln("Sending cached images to MQTT.");
-            for (int i = 0; i < storedImageIndex; i++)
-            {
-                char ifn[30];
-                sprintf(ifn, "/imgtmp/cap_%i", i);
-                File file = SD.open(ifn, "r");
-                if (!file)
-                {
-                    Log.errorln("Failed to open file (%s) in reading mode!!!", ifn);
-                }
-
-                Log.verboseln("Reading file: %s", ifn);
-                int len = file.size();
-                char imgBuf[len + 1];
-                file.readBytes(imgBuf, len);
-                imgBuf[len + 1] = '\0';
-                file.close();
-                Log.verboseln("Sending via MQTT.");
-                int pubRes = mqttClient.publish(imageTopic, 1, false, imgBuf, len);
-                // delete[] imgBuf;
-            }
-        }
-
-        Log.infoln("Sending current image via MQTT.");
-        cam.run();
-
-        int pubRes = mqttClient.publish(imageTopic, 1, false, (char *)cam.getfb(), cam.getSize());
+        Log.warningln("Could not find Preferences!");
+        Log.noticeln("appInstanceID not set yet!");
     }
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
 
-void initRTSPServer()
+void storePrefs()
 {
     String oldMethodName = methodName;
-    methodName = "initRTSPServer()";
+    methodName = "storePrefs()";
     Log.verboseln("Entering...");
 
-    Log.infoln("Starting RTSP Server.");
-    rtspServer.setTimeout(1);
-    rtspServer.begin();
-    rtspServerRunning = true;
+    Log.infoln("Storing Preferences.");
 
-    streamer = new OV2640Streamer(&cam);
-
-    Log.verboseln("Exiting...");
-    methodName = oldMethodName;
-}
-
-void handleRTSP_loop()
-{
-    String oldMethodName = methodName;
-    methodName = "ProcessAppWifiConnectTasks()";
-    Log.verboseln("Entering...");
-
-    uint32_t msecPerFrame = 100;
-    static uint32_t lastimage = millis();
-    // If we have an active client connection, just service that until gone
-    streamer->handleRequests(0); // we don't use a timeout here,
-    // instead we send only if we have new enough frames
-    uint32_t now = millis();
-    if (streamer->anySessions())
-    {
-        if (now > lastimage + msecPerFrame || now < lastimage)
-        { // handle clock rollover
-            streamer->streamImage(now);
-            lastimage = now;
-            // check if we are overrunning our max frame rate
-            now = millis();
-            if (now > lastimage + msecPerFrame)
-            {
-                Log.warningln("warning exceeding max frame rate of %d ms", now - lastimage);
-            }
-        }
-    }
-    // rtsp client / server
-    WiFiClient rtspClient = rtspServer.accept();
-    if (rtspClient)
-    {
-        Log.infoln("Connecting RTSP Client: %s", rtspClient.remoteIP().toString());
-
-        streamer->addSession(&rtspClient);
-    }
+    preferences.putInt("AppInstanceID", appInstanceID);
+    preferences.putInt("Volume", volume);
+    preferences.putInt("BootCount", bootCount);
+    preferences.putString("FriendlyName", friendlyName);
+    // preferences.putBool("EnableSnapshot", enableSnapshot);
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
@@ -342,97 +231,204 @@ void appMessageHandler(char *topic, JsonDocument &doc)
     return;
 }
 
-void loadPrefs()
+//////////////////////////////////////////
+//// Customizable Functions
+//////////////////////////////////////////
+
+void setflash(byte state)
+{
+    if (PIN_FLASH_LED > -1)
+    {
+        digitalWrite(PIN_FLASH_LED, state);
+    }
+}
+
+#ifdef USE_GRAPHICS
+
+void setupDisplay()
 {
     String oldMethodName = methodName;
-    methodName = "loadPrefs()";
-    Log.verboseln("Entering...");
+    methodName = "setupDisplay()";
+    Log.verboseln("Entering");
 
-    bool doesExist = preferences.isKey("appInstanceID");
-    if (doesExist)
-    {
-        Log.infoln("Loading settings.");
-        appInstanceID = preferences.getInt("appInstanceID");
-        volume = preferences.getInt("Volume");
-        bootCount = preferences.getInt("BootCount");
-        preferences.getString("FriendlyName", friendlyName, 100); // 100 is the max length of the string
-        // enableSnapshot = preferences.getBool("EnableSnapshot");
-    }
-    else
-    {
-        Log.warningln("Could not find Preferences!");
-        Log.noticeln("appInstanceID not set yet!");
-    }
+    Log.infoln("Setting up display.");
+
+    tft.init();
+    tft.setRotation(2);
+    tft.fillScreen(TFT_BLACK);
+
+#ifdef USE_OPEN_FONT_RENDERER
+    ofr.setDrawer(tft);
+    ofr.loadFont(NotoSans_Bold, sizeof(NotoSans_Bold));
+    ofr.setFontColor(TFT_WHITE, TFT_BLACK);
+    ofr.setFontSize(baseFontSize);
+    ofr.setAlignment(Align::MiddleCenter);
+#endif
+
+    drawSplashScreen();
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
 
-void storePrefs()
+void drawSplashScreen()
 {
     String oldMethodName = methodName;
-    methodName = "storePrefs()";
-    Log.verboseln("Entering...");
+    methodName = "drawSplashScreen()";
+    Log.verboseln("Entering");
 
-    Log.infoln("Storing Preferences.");
+    char showText[100];
+    if (appInstanceID < 0)
+    {
+        sprintf(showText, "Configuring...");
+    }
+    else
+    {
+        sprintf(showText, "Name: %s", friendlyName);
+    }
+    sprintf(showText, "Device ID: %i", appInstanceID);
+#ifdef USE_OPEN_FONT_RENDERER
+    drawString(appName, screenCenterX, screenCenterY, appNameFontSize);
 
-    preferences.putInt("appInstanceID", appInstanceID);
-    preferences.putInt("Volume", volume);
-    preferences.putInt("BootCount", bootCount);
-    preferences.putString("FriendlyName", friendlyName);
-    // preferences.putBool("EnableSnapshot", enableSnapshot);
+    drawString(showText, screenCenterX, screenCenterY + appNameFontSize / 2 + friendlyNameFontSize, friendlyNameFontSize);
+
+    drawString(showText, screenCenterX, tft.height() - appInstanceIDFontSize / 2, appInstanceIDFontSize);
+#endif
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
 
-void logTimestamp()
+#endif
+
+#ifdef USE_RTSP
+void initRTSPServer()
 {
     String oldMethodName = methodName;
-    methodName = "logTimestamp()";
+    methodName = "initRTSPServer()";
     Log.verboseln("Entering...");
 
-    char c[20];
-    time_t rawtime;
-    struct tm *timeinfo;
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
+    Log.infoln("Starting RTSP Server.");
+    rtspServer.setTimeout(1);
+    rtspServer.begin();
+    rtspServerRunning = true;
 
-    if (timeinfo->tm_year == 70)
-    {
-        sprintf(c, "%10lu ", millis());
-    }
-    else
-    {
-        strftime(c, 20, "%Y%m%d %H:%M:%S", timeinfo);
-    }
-
-    Log.infoln("Time: %s", c);
+    streamer = new OV2640Streamer(&cam);
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
 }
 
-void printTimestamp(Print *_logOutput, int x)
+void handleRTSP_loop()
 {
-    char c[20];
-    time_t rawtime;
-    struct tm *timeinfo;
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
+    String oldMethodName = methodName;
+    methodName = "ProcessAppWifiConnectTasks()";
+    Log.verboseln("Entering...");
 
-    if (timeinfo->tm_year == 70)
+    uint32_t msecPerFrame = 100;
+    static uint32_t lastimage = millis();
+    // If we have an active client connection, just service that until gone
+    streamer->handleRequests(0); // we don't use a timeout here,
+    // instead we send only if we have new enough frames
+    uint32_t now = millis();
+    if (streamer->anySessions())
     {
-        sprintf(c, "%10lu ", millis());
+        if (now > lastimage + msecPerFrame || now < lastimage)
+        { // handle clock rollover
+            streamer->streamImage(now);
+            lastimage = now;
+            // check if we are overrunning our max frame rate
+            now = millis();
+            if (now > lastimage + msecPerFrame)
+            {
+                Log.warningln("warning exceeding max frame rate of %d ms", now - lastimage);
+            }
+        }
+    }
+    // rtsp client / server
+    WiFiClient rtspClient = rtspServer.accept();
+    if (rtspClient)
+    {
+        Log.infoln("Connecting RTSP Client: %s", rtspClient.remoteIP().toString());
+
+        streamer->addSession(&rtspClient);
+    }
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
+}
+#endif
+
+void initAppStrings()
+{
+    sprintf(appSubTopic, "%s/#", appName);
+    sprintf(imageTopic, "%s/image", appName);
+}
+
+void mqttPublishImage()
+{
+    String oldMethodName = methodName;
+    methodName = "mqttPublishImage()";
+    Log.verboseln("Entering");
+
+    if (!mqttConnected)
+    {
+        Log.infoln("MQTT not connected. Caching images to SD.");
+        char ifn[30];
+        sprintf(ifn, "/imgtemp/cap_%i.jpg", storedImageIndex);
+        Log.infoln("Opening %s", ifn);
+        /*
+        File file = SD_MMC.open(ifn, FILE_WRITE);
+        if (file)
+        {
+            Log.infoln("Opened %s", ifn);
+            cam.run();
+            file.write(cam.getfb(), cam.getSize()); // payload (image), payload length
+            file.close();
+            Log.infoln("Saved image to: %s\n", ifn);
+            storedImageIndex++;
+        }
+        else
+        {
+            Log.errorln("Failed to open file (%s) in writing mode!!!", ifn);
+        }
+        */
     }
     else
     {
-        strftime(c, 20, "%Y%m%d %H:%M:%S", timeinfo);
+        if (storedImageIndex > 0)
+        {
+            Log.infoln("Sending cached images to MQTT.");
+            for (int i = 0; i < storedImageIndex; i++)
+            {
+                char ifn[30];
+                sprintf(ifn, "/imgtmp/cap_%i", i);
+                File file = SD.open(ifn, "r");
+                if (!file)
+                {
+                    Log.errorln("Failed to open file (%s) in reading mode!!!", ifn);
+                }
+
+                Log.verboseln("Reading file: %s", ifn);
+                int len = file.size();
+                char imgBuf[len + 1];
+                file.readBytes(imgBuf, len);
+                imgBuf[len + 1] = '\0';
+                file.close();
+                Log.verboseln("Sending via MQTT.");
+                int pubRes = mqttClient.publish(imageTopic, 1, false, imgBuf, len);
+                // delete[] imgBuf;
+            }
+        }
+
+        Log.infoln("Sending current image via MQTT.");
+        cam.run();
+
+        int pubRes = mqttClient.publish(imageTopic, 1, false, (char *)cam.getfb(), cam.getSize());
     }
-    _logOutput->print(c);
-    _logOutput->print(": ");
-    _logOutput->print(methodName);
-    _logOutput->print(": ");
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
 }
 
 bool checkGoodTime()
@@ -528,7 +524,8 @@ void mailboxClosed()
 {
     Log.infoln("Going to sleep now");
     WiFi.mode(WIFI_OFF);
-    adc_power_off();
+    // TODO: see if this is needed
+    // adc_power_off();
     esp_deep_sleep_start();
 }
 
@@ -543,26 +540,36 @@ void app_setup()
 
     // Configure Hardware
     Log.infoln("Configuring hardware.");
+
+#ifdef USE_DEEP_SLEEP
     pinMode(WAKEUP_GPIO, INPUT);
-    //attachInterrupt(digitalPinToInterrupt(WAKEUP_GPIO), mailboxOpened, FALLING);
+    // TODO: Fix this. would like to go to sleep on IRQ instead of polling like this
     // create a rising interrupt on GPIO 13
+    // attachInterrupt(digitalPinToInterrupt(WAKEUP_GPIO), mailboxOpened, FALLING);
 
     Log.infoln("Configuring wakeup.");
     esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK(WAKEUP_GPIO), ESP_EXT1_WAKEUP_ANY_HIGH);
 
-    /*
-  If there are no external pull-up/downs, tie wakeup pins to inactive level with internal pull-up/downs via RTC IO
-       during deepsleep. However, RTC IO relies on the RTC_PERIPH power domain. Keeping this power domain on will
-       increase some power comsumption. However, if we turn off the RTC_PERIPH domain or if certain chips lack the RTC_PERIPH
-       domain, we will use the HOLD feature to maintain the pull-up and pull-down on the pins during sleep.
-*/
+    // If there are no external pull-up/downs, tie wakeup pins to
+    // inactive level with internal pull-up/downs via RTC IO
+    // during deepsleep. However, RTC IO relies on the RTC_PERIPH 
+    // power domain. Keeping this power domain on will
+    // increase some power comsumption.However, if we turn off the
+    // RTC_PERIPH domain or if certain chips lack the RTC_PERIPH
+    // domain, we will use the HOLD feature to maintain the pull-up
+    // and pull-down on the pins during sleep.* / 
+    
     rtc_gpio_pulldown_en(WAKEUP_GPIO); // GPIO33 is tie to GND in order to wake up in HIGH
     rtc_gpio_pullup_dis(WAKEUP_GPIO);  // Disable PULL_UP in order to allow it to wakeup on HIGH
+#endif
 
+
+#ifdef USE_ESP32_CAM
     mqttImageSendTimer = xTimerCreate("mqttImageSendTimer", pdMS_TO_TICKS(200), pdTRUE,
                                       (void *)0, reinterpret_cast<TimerCallbackFunction_t>(mqttPublishImage));
+#endif
 
-/*
+    ///*
     File root = SD.open("/");
     if (!root)
     {
@@ -573,14 +580,14 @@ void app_setup()
         printDirectory(root, 0);
     }
     root.close();
-*/
+    //*/
     // Turns off the ESP32-CAM white on-board LED (flash) connected to GPIO 4
     // uncomment if LED is still soldered to GPIO4
     pinMode(4, OUTPUT);
     digitalWrite(4, LOW);
     gpio_hold_en(GPIO_NUM_4);
 
-    //xTimerStart(mqttImageSendTimer, pdMS_TO_TICKS(5000));
+    // xTimerStart(mqttImageSendTimer, pdMS_TO_TICKS(5000));
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
@@ -594,13 +601,15 @@ void app_setup()
 
 void app_loop()
 {
-
-
+#ifdef USE_DEEP_SLEEP
     if (digitalRead(WAKEUP_GPIO) == 0)
         mailboxClosed();
+#endif
 
-            if (rtspServerRunning)
-                handleRTSP_loop();
+#ifdef USE_RTSP
+    if (rtspServerRunning)
+        handleRTSP_loop();
+#endif
 
     if ((millis() % 1000) == 0)
     {

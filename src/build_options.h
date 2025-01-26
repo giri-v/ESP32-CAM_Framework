@@ -6,6 +6,8 @@
 #ifndef BUILD_OPTIONS_H
 #define BUILD_OPTIONS_H
 
+#define USE_DEEP_SLEEP
+#define USE_ESP32_CAM
 //#define USE_GRAPHICS
 //#define USE_OPEN_FONT_RENDERER
 #define USE_SD_CARD

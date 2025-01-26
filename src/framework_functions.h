@@ -14,36 +14,123 @@ const long gmtOffset_sec = -8 * 60 * 60;
 const int daylightOffset_sec = 3600;
 int maxWifiFailCount = 5;
 int wifiFailCountTimeLimit = 10;
+int wifiFailCount = 0;
+char latestFirmwareFileName[100];
+
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
 TimerHandle_t appInstanceIDWaitTimer;
 TimerHandle_t wifiFailCountTimer;
 
-int wifiFailCount = 0;
 
-char latestFirmwareFileName[100];
+
+void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason);
+void logResetReason(esp_reset_reason_t reset_reason);
+void logMACAddress(uint8_t baseMac[6]);
 
 void connectToWifi();
-void connectToMqtt();
 void resetWifiFailCount(TimerHandle_t xTimer);
-void doUpdateFirmware(char *fileName);
-int getlatestFirmware(char *fileName);
-void checkFWUpdate();
 void onWifiConnect(const WiFiEvent_t &event);
 void onWifiDisconnect(const WiFiEvent_t &event);
 void WiFiEvent(WiFiEvent_t event);
+
+void connectToMqtt();
 void mqttPublishWill();
 void mqttPublishID();
 bool checkMessageForAppSecret(JsonDocument &doc);
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
-void logMACAddress(uint8_t baseMac[6]);
+
+void doUpdateFirmware(char *fileName);
+int getlatestFirmware(char *fileName);
+void checkFWUpdate();
+
+
+
 void setAppInstanceID();
+
 void framework_setup();
-void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason);
-void logResetReason(esp_reset_reason_t reset_reason);
 void framework_loop();
-void setflash(byte state);
-void initCAM();
+
+
+
+void logMACAddress(uint8_t baseMac[6])
+{
+    char mac[200];
+    sprintf(mac, "MAC Address: { %02x:%02x:%02x:%02x:%02x:%02x }",
+            baseMac[0], baseMac[1], baseMac[2],
+            baseMac[3], baseMac[4], baseMac[5]);
+    Log.infoln(mac);
+}
+
+void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason)
+{
+    switch (wakeup_reason)
+    {
+    case ESP_SLEEP_WAKEUP_EXT0:
+        Log.infoln("Wakeup caused by external signal using RTC_IO");
+        break;
+    case ESP_SLEEP_WAKEUP_EXT1:
+        Log.infoln("Wakeup caused by external signal using RTC_CNTL");
+        break;
+    case ESP_SLEEP_WAKEUP_TIMER:
+        Log.infoln("Wakeup caused by timer");
+        break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:
+        Log.infoln("Wakeup caused by touchpad");
+        break;
+    case ESP_SLEEP_WAKEUP_ULP:
+        Log.infoln("Wakeup caused by ULP program");
+        break;
+    default:
+        Log.infoln("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
+        break;
+    }
+}
+
+void logResetReason(esp_reset_reason_t reset_reason)
+{
+    switch (reset_reason)
+    {
+    case ESP_RST_UNKNOWN:
+        Log.infoln("Reset reason can not be determined");
+        break;
+    case ESP_RST_POWERON:
+        Log.infoln("Reset due to power-on event");
+        break;
+    case ESP_RST_EXT:
+        Log.infoln("Reset by external pin (not applicable for ESP32)");
+        break;
+    case ESP_RST_SW:
+        Log.infoln("Software reset via esp_restart");
+        break;
+    case ESP_RST_PANIC:
+        Log.infoln("Software reset due to exception/panic");
+        break;
+    case ESP_RST_INT_WDT:
+        Log.infoln("Reset (software or hardware) due to interrupt watchdog");
+        break;
+    case ESP_RST_TASK_WDT:
+        Log.infoln("Reset due to task watchdog");
+        break;
+    case ESP_RST_WDT:
+        Log.infoln("Reset due to other watchdogs");
+        break;
+    case ESP_RST_DEEPSLEEP:
+        Log.infoln("Reset after exiting deep sleep mode");
+        break;
+    case ESP_RST_BROWNOUT:
+        Log.infoln("Brownout reset (software or hardware)");
+        break;
+    case ESP_RST_SDIO:
+        Log.infoln("Reset over SDIO");
+        break;
+    default:
+        Log.infoln("Reset reason can not be determined");
+        break;
+    }
+}
+
+#endif // FRAMEWORK_FUNCTIONS_H
 
 void connectToWifi()
 {
@@ -52,17 +139,6 @@ void connectToWifi()
 
     Log.infoln("Connecting...");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    methodName = oldMethodName;
-}
-
-void connectToMqtt()
-{
-    String oldMethodName = methodName;
-    methodName = "connectToMqtt()";
-
-    Log.infoln("Connecting to MQTT broker...");
-    mqttClient.connect();
 
     methodName = oldMethodName;
 }
@@ -77,225 +153,6 @@ void resetWifiFailCount(TimerHandle_t xTimer)
 
     wifiFailCount = 0;
     xTimerStop(xTimer, 0);
-
-    Log.verboseln("Exiting...");
-    methodName = oldMethodName;
-}
-
-void setflash(byte state)
-{
-    if (PIN_FLASH_LED > -1)
-    {
-        digitalWrite(PIN_FLASH_LED, state);
-    }
-}
-
-void initCAM()
-{
-    camera_config_t cconfig;
-    cconfig = esp32cam_aithinker_config;
-    if (psramFound()  && psramInit())
-    {
-        Log.infoln("Configuring CAM to use PSRAM");
-        cconfig.frame_size = RESOLUTION; // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
-        cconfig.jpeg_quality = QUALITY;
-        cconfig.fb_count = 2;
-    }
-    else
-    {
-        Log.warningln("PSRAM NOT FOUND. Configuring CAM normally.");
-        if (RESOLUTION > FRAMESIZE_SVGA)
-        {
-            cconfig.frame_size = FRAMESIZE_SVGA;
-        }
-        cconfig.jpeg_quality = 12;
-        cconfig.fb_count = 1;
-    }
-
-    if (PIN_FLASH_LED > -1)
-    {
-        //pinMode(PIN_FLASH_LED, OUTPUT);
-        //setflash(0);
-    }
-
-    if (cam.init(cconfig) != 0)
-        Log.errorln("Failed to configure camera!");
-    else
-        Log.infoln("Camera configuration complete.");
-}
-
-void doUpdateFirmware(char *fileName)
-{
-    String oldMethodName = methodName;
-    methodName = "doUpdateFirmware(char *fileName)";
-    Log.verboseln("Entering...");
-
-    String fsFileName = "/" + String(fileName);
-
-    File file = LittleFS.open(fsFileName);
-
-    if (!file)
-    {
-        Log.errorln("Failed to open file for reading");
-        return;
-    }
-
-    Log.infoln("Starting update..");
-
-    size_t fileSize = file.size();
-
-    if (!Update.begin(fileSize))
-    {
-
-        Log.warningln("Cannot do the update!");
-        // TODO: publish a message that the update failed
-
-        return;
-    };
-
-    Update.writeStream(file);
-
-    if (Update.end())
-    {
-        Log.infoln("Successful update");
-    }
-    else
-    {
-
-        Log.errorln("Error Occurred: %s", String(Update.getError()));
-        // TODO: publish a message that the update failed
-        return;
-    }
-
-    file.close();
-
-    Log.infoln("Reset in 2 seconds...");
-    delay(2000);
-
-    reboot("Firmware update complete.");
-}
-
-int getlatestFirmware(char *fileName)
-{
-    String oldMethodName = methodName;
-    methodName = "int getlatestFirmware(char *fileName)";
-
-    int result = -1;
-    int httpCode = -1;
-
-    WiFiClient client;
-    HTTPClient http;
-    String payload;
-
-    String fsFileName = "/" + String(fileName);
-
-    File f = LittleFS.open(fsFileName, FILE_WRITE);
-    if (f)
-    {
-        Log.verboseln("[HTTP] begin...");
-
-        // int connRes = client.connect(IPAddress(192,168,0,12), 5000);
-        // Log.verboseln("Connected: %d", connRes);
-
-        // if (http.begin(client, req))
-        String url = String("/firmware/") + fileName;
-
-        if (http.begin(client, HTTP_SERVER, HTTP_PORT, url))
-        { // HTTP
-
-            Log.verboseln("[HTTP] GET...");
-            // start connection and send HTTP header
-            int httpCode = http.GET();
-            result = httpCode;
-            if (httpCode > 0)
-            {
-                if (httpCode == HTTP_CODE_OK)
-                {
-                    WiFiClient *stream = http.getStreamPtr();
-                    while (stream->available())
-                    {
-                        char c = stream->read();
-                        f.print(c);
-                    }
-                }
-            }
-            else
-            {
-                Log.verboseln("[HTTP] GET... failed, error: %s\n",
-                              http.errorToString(httpCode).c_str());
-            }
-
-            f.close();
-            http.end();
-        }
-        else
-        {
-            Log.warningln("[HTTP] Unable to connect");
-        }
-    }
-
-    Log.verboseln("Exiting...");
-    methodName = oldMethodName;
-    return httpCode;
-}
-
-void checkFWUpdate()
-{
-    String oldMethodName = methodName;
-    methodName = "checkFWUpdate()";
-
-    String fileList;
-    String server_req;
-    int latestFWImageIndex = appVersion;
-
-    Log.infoln("Checking for FW updates.");
-    int code = webGet(firmwareUrl, fileList);
-
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, fileList);
-    for (size_t i = 0; i < doc.size(); i++)
-    {
-        String fn = doc[i]["name"];
-        if ((doc[i]["type"] == "file") && fn.startsWith(appName) && fn.endsWith(".bin"))
-        {
-            Log.verboseln("Got firmware file: %s", fn.c_str());
-            String findex = fn.substring(strlen(appName) + 1, fn.length() - 4);
-            int fidx = findex.toInt();
-            Log.verboseln("Got firmware index: %d", fidx);
-            latestFWImageIndex = max(latestFWImageIndex, fidx);
-        }
-    }
-
-    if (latestFWImageIndex > appVersion)
-    {
-        Log.infoln("New firmware available: v%d", latestFWImageIndex);
-        sprintf(latestFirmwareFileName, "%s_%d.bin", appName, latestFWImageIndex);
-        Log.infoln("Downloading %s", latestFirmwareFileName);
-        code = getlatestFirmware(latestFirmwareFileName);
-
-        Log.infoln("Updating firmware...");
-        doUpdateFirmware(latestFirmwareFileName);
-    }
-    else
-    {
-        Log.infoln("No new firmware available.");
-    }
-
-    Log.verboseln("Exiting...");
-    methodName = oldMethodName;
-}
-
-void setAppInstanceID()
-{
-    String oldMethodName = methodName;
-    methodName = "setAppInstanceID()";
-    Log.verboseln("Entering...");
-
-    appInstanceID = maxOtherIndex + 1;
-    storePrefs();
-
-    Log.infoln("Got appInstanceID, restarting...");
-    esp_restart();
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;
@@ -396,6 +253,17 @@ void WiFiEvent(WiFiEvent_t event)
     methodName = oldMethodName;
 }
 
+void connectToMqtt()
+{
+    String oldMethodName = methodName;
+    methodName = "connectToMqtt()";
+
+    Log.infoln("Connecting to MQTT broker...");
+    mqttClient.connect();
+
+    methodName = oldMethodName;
+}
+
 void mqttPublishID()
 {
     String oldMethodName = methodName;
@@ -438,9 +306,9 @@ void onMqttConnect(bool sessionPresent)
     methodName = "onMqttConnect(bool sessionPresent)";
     Log.verboseln("Entering...");
 
+    mqttConnected = true;
     Log.infoln("Connected to MQTT broker: %p , port: %d", MQTT_HOST, MQTT_PORT);
     Log.infoln("Session present: %T", sessionPresent);
-    mqttConnected = true;
 
     if (appInstanceID > -1)
     {
@@ -469,9 +337,8 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 
     (void)reason;
 
-    Log.warningln("Disconnected from MQTT.");
-
     mqttConnected = false;
+    Log.warningln("Disconnected from MQTT.");
 
     ProcessMqttDisconnectTasks();
 
@@ -674,13 +541,181 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
     methodName = oldMethodName;
 }
 
-void logMACAddress(uint8_t baseMac[6])
+void doUpdateFirmware(char *fileName)
 {
-    char mac[200];
-    sprintf(mac, "MAC Address: { %02x:%02x:%02x:%02x:%02x:%02x }",
-            baseMac[0], baseMac[1], baseMac[2],
-            baseMac[3], baseMac[4], baseMac[5]);
-    Log.infoln(mac);
+    String oldMethodName = methodName;
+    methodName = "doUpdateFirmware(char *fileName)";
+    Log.verboseln("Entering...");
+
+    String fsFileName = "/" + String(fileName);
+
+    File file = LittleFS.open(fsFileName);
+
+    if (!file)
+    {
+        Log.errorln("Failed to open file for reading");
+        return;
+    }
+
+    Log.infoln("Starting update..");
+
+    size_t fileSize = file.size();
+
+    if (!Update.begin(fileSize))
+    {
+
+        Log.warningln("Cannot do the update!");
+        // TODO: publish a message that the update failed
+
+        return;
+    };
+
+    Update.writeStream(file);
+
+    if (Update.end())
+    {
+        Log.infoln("Successful update");
+    }
+    else
+    {
+
+        Log.errorln("Error Occurred: %s", String(Update.getError()));
+        // TODO: publish a message that the update failed
+        return;
+    }
+
+    file.close();
+
+    Log.infoln("Reset in 2 seconds...");
+    delay(2000);
+
+    reboot("Firmware update complete.");
+}
+
+int getlatestFirmware(char *fileName)
+{
+    String oldMethodName = methodName;
+    methodName = "int getlatestFirmware(char *fileName)";
+
+    int result = -1;
+    int httpCode = -1;
+
+    WiFiClient client;
+    HTTPClient http;
+    String payload;
+
+    String fsFileName = "/" + String(fileName);
+
+    File f = LittleFS.open(fsFileName, FILE_WRITE);
+    if (f)
+    {
+        Log.verboseln("[HTTP] begin...");
+
+        // int connRes = client.connect(IPAddress(192,168,0,12), 5000);
+        // Log.verboseln("Connected: %d", connRes);
+
+        // if (http.begin(client, req))
+        String url = String("/firmware/") + fileName;
+
+        if (http.begin(client, HTTP_SERVER, HTTP_PORT, url))
+        { // HTTP
+
+            Log.verboseln("[HTTP] GET...");
+            // start connection and send HTTP header
+            int httpCode = http.GET();
+            result = httpCode;
+            if (httpCode > 0)
+            {
+                if (httpCode == HTTP_CODE_OK)
+                {
+                    WiFiClient *stream = http.getStreamPtr();
+                    while (stream->available())
+                    {
+                        char c = stream->read();
+                        f.print(c);
+                    }
+                }
+            }
+            else
+            {
+                Log.verboseln("[HTTP] GET... failed, error: %s\n",
+                              http.errorToString(httpCode).c_str());
+            }
+
+            f.close();
+            http.end();
+        }
+        else
+        {
+            Log.warningln("[HTTP] Unable to connect");
+        }
+    }
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
+    return httpCode;
+}
+
+void checkFWUpdate()
+{
+    String oldMethodName = methodName;
+    methodName = "checkFWUpdate()";
+
+    String fileList;
+    String server_req;
+    int latestFWImageIndex = appVersion;
+
+    Log.infoln("Checking for FW updates.");
+    int code = webGet(firmwareUrl, fileList);
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, fileList);
+    for (size_t i = 0; i < doc.size(); i++)
+    {
+        String fn = doc[i]["name"];
+        if ((doc[i]["type"] == "file") && fn.startsWith(appName) && fn.endsWith(".bin"))
+        {
+            Log.verboseln("Got firmware file: %s", fn.c_str());
+            String findex = fn.substring(strlen(appName) + 1, fn.length() - 4);
+            int fidx = findex.toInt();
+            Log.verboseln("Got firmware index: %d", fidx);
+            latestFWImageIndex = max(latestFWImageIndex, fidx);
+        }
+    }
+
+    if (latestFWImageIndex > appVersion)
+    {
+        Log.infoln("New firmware available: v%d", latestFWImageIndex);
+        sprintf(latestFirmwareFileName, "%s_%d.bin", appName, latestFWImageIndex);
+        Log.infoln("Downloading %s", latestFirmwareFileName);
+        code = getlatestFirmware(latestFirmwareFileName);
+
+        Log.infoln("Updating firmware...");
+        doUpdateFirmware(latestFirmwareFileName);
+    }
+    else
+    {
+        Log.infoln("No new firmware available.");
+    }
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
+}
+
+void setAppInstanceID()
+{
+    String oldMethodName = methodName;
+    methodName = "setAppInstanceID()";
+    Log.verboseln("Entering...");
+
+    appInstanceID = maxOtherIndex + 1;
+    storePrefs();
+
+    Log.infoln("Got appInstanceID, restarting...");
+    esp_restart();
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
 }
 
 void framework_setup()
@@ -742,7 +777,9 @@ void framework_setup()
         Log.infoln("AppInstanceID: %d", appInstanceID);
     }
 
+#ifdef USE_ESP32_CAM
     initCAM();
+#endif
 
     initFS();
 
@@ -814,73 +851,3 @@ void framework_start()
 {
     connectToWifi();
 }
-
-void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason)
-{
-    switch (wakeup_reason)
-    {
-    case ESP_SLEEP_WAKEUP_EXT0:
-        Log.infoln("Wakeup caused by external signal using RTC_IO");
-        break;
-    case ESP_SLEEP_WAKEUP_EXT1:
-        Log.infoln("Wakeup caused by external signal using RTC_CNTL");
-        break;
-    case ESP_SLEEP_WAKEUP_TIMER:
-        Log.infoln("Wakeup caused by timer");
-        break;
-    case ESP_SLEEP_WAKEUP_TOUCHPAD:
-        Log.infoln("Wakeup caused by touchpad");
-        break;
-    case ESP_SLEEP_WAKEUP_ULP:
-        Log.infoln("Wakeup caused by ULP program");
-        break;
-    default:
-        Log.infoln("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
-        break;
-    }
-}
-
-void logResetReason(esp_reset_reason_t reset_reason)
-{
-    switch (reset_reason)
-    {
-    case ESP_RST_UNKNOWN:
-        Log.infoln("Reset reason can not be determined");
-        break;
-    case ESP_RST_POWERON:
-        Log.infoln("Reset due to power-on event");
-        break;
-    case ESP_RST_EXT:
-        Log.infoln("Reset by external pin (not applicable for ESP32)");
-        break;
-    case ESP_RST_SW:
-        Log.infoln("Software reset via esp_restart");
-        break;
-    case ESP_RST_PANIC:
-        Log.infoln("Software reset due to exception/panic");
-        break;
-    case ESP_RST_INT_WDT:
-        Log.infoln("Reset (software or hardware) due to interrupt watchdog");
-        break;
-    case ESP_RST_TASK_WDT:
-        Log.infoln("Reset due to task watchdog");
-        break;
-    case ESP_RST_WDT:
-        Log.infoln("Reset due to other watchdogs");
-        break;
-    case ESP_RST_DEEPSLEEP:
-        Log.infoln("Reset after exiting deep sleep mode");
-        break;
-    case ESP_RST_BROWNOUT:
-        Log.infoln("Brownout reset (software or hardware)");
-        break;
-    case ESP_RST_SDIO:
-        Log.infoln("Reset over SDIO");
-        break;
-    default:
-        Log.infoln("Reset reason can not be determined");
-        break;
-    }
-}
-
-#endif // FRAMEWORK_FUNCTIONS_H
