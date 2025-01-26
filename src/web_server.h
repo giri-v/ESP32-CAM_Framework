@@ -104,7 +104,7 @@ void initWebServer()
     webServer.onFileUpload(handleUpload);
 
     // Handle static files
-    webServer.serveStatic("", LittleFS, "/www/");
+    // webServer.serveStatic("", LittleFS, "/www/");
 
     // visiting this page will cause you to be logged out
     webServer.on("/logout", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -117,7 +117,56 @@ void initWebServer()
                  {
     String logmessage = "Client:" + request->client()->remoteIP().toString() + " " + request->url();
     Log.infoln(logmessage.c_str());
-    request->send_P(401, "text/html", logout_html, processor); });
+    request->send(401, "text/html", logout_html, processor); });
+
+    webServer.on("/jpg", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                   String logmessage = "Client:" + request->client()->remoteIP().toString() + +" " + request->url();
+
+                   if (checkUserWebAuth(request))
+                   {
+                       logmessage += " Auth: Success";
+                       Log.infoln(logmessage.c_str());
+                       
+                       cam.run();
+
+                       //int len = cam.getSize();
+
+                       //Log.infoln("Got frame size: %i", len);
+                       request->send(200, "image/jpeg", cam.getfb(), cam.getSize());
+                   }
+                   else
+                   {
+                       logmessage += " Auth: Failed";
+                       Log.infoln(logmessage.c_str());
+                       return request->requestAuthentication();
+                   } });
+
+    webServer.on("/mjpg", HTTP_GET, [](AsyncWebServerRequest *request)
+                 {
+                   String logmessage = "Client:" + request->client()->remoteIP().toString() + +" " + request->url();
+
+                   if (checkUserWebAuth(request))
+                   {
+                       logmessage += " Auth: Success";
+                       Log.infoln(logmessage.c_str());
+                       
+
+                       //int len = cam.getSize();
+
+                       //Log.infoln("Got frame size: %i", len);
+                       request->sendChunked("image/jpeg", [](uint8_t *buffer, size_t maxLen, size_t index)
+                                            {
+                              int len = cam.getSize();
+                              memcpy(buffer, cam.getfb(), len);
+                              return len; });
+                   }
+                   else
+                   {
+                       logmessage += " Auth: Failed";
+                       Log.infoln(logmessage.c_str());
+                       return request->requestAuthentication();
+                   } });
 
     webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
                  {
@@ -127,7 +176,7 @@ void initWebServer()
                    {
                        logmessage += " Auth: Success";
                        Log.infoln(logmessage.c_str());
-                       request->send_P(200, "text/html", index_html, processor);
+                       request->send(200, "text/html", index_html, processor);
                    }
                    else
                    {
@@ -144,7 +193,7 @@ void initWebServer()
                    {
                        logmessage += " Auth: Success";
                        Log.infoln(logmessage.c_str());
-                       request->send_P(200, "text/css", simple_css, processor);
+                       request->send(200, "text/css", simple_css, processor);
                    }
                    else
                    {

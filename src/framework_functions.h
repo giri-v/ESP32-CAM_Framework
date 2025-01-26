@@ -115,7 +115,7 @@ void initCAM()
         cconfig.jpeg_quality = 12;
         cconfig.fb_count = 1;
     }
-    
+
     if (PIN_FLASH_LED > -1)
     {
         pinMode(PIN_FLASH_LED, OUTPUT);
@@ -683,7 +683,7 @@ void logMACAddress(uint8_t baseMac[6])
 
 void framework_setup()
 {
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
+    //WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
     // Framework: Setting up logging
     Serial.begin(115200);
     Serial.println("Starting....");
