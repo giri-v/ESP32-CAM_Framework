@@ -51,6 +51,7 @@ extern "C"
 
 #include "driver/rtc_io.h"
 #include "soc/rtc_cntl_reg.h"
+#include "driver/adc.h"
 
 OV2640 cam;
 #define RESOLUTION FRAMESIZE_XGA // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
@@ -139,6 +140,12 @@ uint8_t macAddress[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 String methodName = "";
 
 #pragma region Standard Helper Functions
+
+void reboot(const char *message)
+{
+    Log.infoln("Rebooting ESP32: %s", message);
+    ESP.restart();
+}
 
 bool isNullorEmpty(char *str)
 {

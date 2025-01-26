@@ -45,12 +45,6 @@ void framework_loop();
 void setflash(byte state);
 void initCAM();
 
-void reboot(const char *message)
-{
-    Log.infoln("Rebooting ESP32: %s", message);
-    ESP.restart();
-}
-
 void connectToWifi()
 {
     String oldMethodName = methodName;

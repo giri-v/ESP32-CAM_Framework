@@ -46,6 +46,7 @@ int timeFontSize = 128;
 int storedImageIndex = 0;
 
 bool rtspServerRunning = false;
+int pin2Val = 0;
 
 // ********** Possible Customizations Start ***********
 char imageTopic[75];
@@ -515,13 +516,19 @@ void drawTime()
     methodName = oldMethodName;
 }
 
-IRAM_ATTR void interruptService()
-{
-}
-
+/*
 IRAM_ATTR void mailboxOpened()
 {
     Log.infoln("Going to sleep now");
+    esp_deep_sleep_start();
+}
+*/
+
+void mailboxClosed()
+{
+    Log.infoln("Going to sleep now");
+    WiFi.mode(WIFI_OFF);
+    adc_power_off();
     esp_deep_sleep_start();
 }
 
@@ -537,9 +544,10 @@ void app_setup()
     // Configure Hardware
     Log.infoln("Configuring hardware.");
     pinMode(WAKEUP_GPIO, INPUT);
-    attachInterrupt(digitalPinToInterrupt(WAKEUP_GPIO), mailboxOpened, FALLING);
+    //attachInterrupt(digitalPinToInterrupt(WAKEUP_GPIO), mailboxOpened, FALLING);
     // create a rising interrupt on GPIO 13
 
+    Log.infoln("Configuring wakeup.");
     esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK(WAKEUP_GPIO), ESP_EXT1_WAKEUP_ANY_HIGH);
 
     /*
@@ -554,6 +562,7 @@ void app_setup()
     mqttImageSendTimer = xTimerCreate("mqttImageSendTimer", pdMS_TO_TICKS(200), pdTRUE,
                                       (void *)0, reinterpret_cast<TimerCallbackFunction_t>(mqttPublishImage));
 
+/*
     File root = SD.open("/");
     if (!root)
     {
@@ -564,7 +573,7 @@ void app_setup()
         printDirectory(root, 0);
     }
     root.close();
-
+*/
     // Turns off the ESP32-CAM white on-board LED (flash) connected to GPIO 4
     // uncomment if LED is still soldered to GPIO4
     pinMode(4, OUTPUT);
@@ -585,8 +594,13 @@ void app_setup()
 
 void app_loop()
 {
-    if (rtspServerRunning)
-        handleRTSP_loop();
+
+
+    if (digitalRead(WAKEUP_GPIO) == 0)
+        mailboxClosed();
+
+            if (rtspServerRunning)
+                handleRTSP_loop();
 
     if ((millis() % 1000) == 0)
     {
