@@ -22,8 +22,6 @@ TimerHandle_t wifiReconnectTimer;
 TimerHandle_t appInstanceIDWaitTimer;
 TimerHandle_t wifiFailCountTimer;
 
-
-
 void logWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason);
 void logResetReason(esp_reset_reason_t reset_reason);
 void logMACAddress(uint8_t baseMac[6]);
@@ -44,14 +42,10 @@ void doUpdateFirmware(char *fileName);
 int getlatestFirmware(char *fileName);
 void checkFWUpdate();
 
-
-
 void setAppInstanceID();
 
 void framework_setup();
 void framework_loop();
-
-
 
 void logMACAddress(uint8_t baseMac[6])
 {
@@ -720,8 +714,8 @@ void setAppInstanceID()
 
 void framework_setup()
 {
-    //WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
-    // Framework: Setting up logging
+    // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
+    //  Framework: Setting up logging
     Serial.begin(115200);
     Serial.println("Starting....");
 
@@ -804,7 +798,6 @@ void framework_setup()
                                       pdFALSE, (void *)0,
                                       reinterpret_cast<TimerCallbackFunction_t>(resetWifiFailCount));
 
-    WiFi.hostname(hostname);
     WiFi.onEvent(WiFiEvent);
 
     mqttClient.onConnect(onMqttConnect);
@@ -816,6 +809,10 @@ void framework_setup()
 
     if (appInstanceID >= 0)
     {
+        if (strcmp(friendlyName, "NoNameSet") < 0)
+            hostname = friendlyName;
+        else
+            hostname += '_' + appInstanceID;
         mqttClient.onMessage(onMqttMessage);
     }
     else
@@ -826,6 +823,7 @@ void framework_setup()
                                               reinterpret_cast<TimerCallbackFunction_t>(setAppInstanceID));
         xTimerStart(appInstanceIDWaitTimer, 0);
     }
+    WiFi.hostname(hostname);
 }
 
 void framework_loop()
@@ -844,7 +842,6 @@ void framework_loop()
     if (!mp3Done)
         playMP3Loop();
 #endif
-
 }
 
 void framework_start()

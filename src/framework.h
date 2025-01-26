@@ -24,7 +24,6 @@ extern "C"
 #ifndef SECRETS_H
 #define SECRETS_H
 
-#define HOSTNAME "myESP8266";
 #define NTP_SERVER "pool.ntp.org"
 
 #define WIFI_SSID "APName"
@@ -38,6 +37,11 @@ extern "C"
 
 #define LATITUDE 37.3380937
 #define LONGITUDE -121.8853892
+
+#define APP_KEY ""
+#define APP_SECRET "536CB6A57A55C82BEDD22A9566A47"
+
+#define RTSP_PORT 554
 
 #endif // SECRETS_H
 
@@ -56,7 +60,6 @@ extern "C"
 #endif
 
 #ifdef USE_RTSP
-#define RTSP_PORT 554
 
 #include "OV2640Streamer.h"
 #include "CRtspSession.h"
@@ -110,7 +113,7 @@ const char *appSecret = APP_SECRET;
 #define FIRMWARE_VERSION "v0.0.1"
 
 const char *ntpServer = NTP_SERVER;
-String hostname = HOSTNAME;
+String hostname = APP_NAME;
 
 int appInstanceID = -1;
 char friendlyName[100] = "NoNameSet";
