@@ -100,14 +100,16 @@ void initCAM()
 {
     camera_config_t cconfig;
     cconfig = esp32cam_aithinker_config;
-    if (psramFound())
+    if (psramFound()  && psramInit())
     {
+        Log.infoln("Configuring CAM to use PSRAM");
         cconfig.frame_size = RESOLUTION; // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
         cconfig.jpeg_quality = QUALITY;
         cconfig.fb_count = 2;
     }
     else
     {
+        Log.warningln("PSRAM NOT FOUND. Configuring CAM normally.");
         if (RESOLUTION > FRAMESIZE_SVGA)
         {
             cconfig.frame_size = FRAMESIZE_SVGA;

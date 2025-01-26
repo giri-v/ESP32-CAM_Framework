@@ -12,6 +12,10 @@
 #include "web_server.h"
 #endif
 
+#define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO) // 2 ^ GPIO_NUMBER in hex
+#define USE_EXT0_WAKEUP 1                       // 1 = EXT0 wakeup, 0 = EXT1 wakeup
+#define WAKEUP_GPIO GPIO_NUM_2                 // Only RTC IO are allowed - ESP32 Pin example
+
 // ********* Framework App Parameters *****************
 
 int appVersion = 1;
@@ -144,11 +148,11 @@ void mqttPublishImage()
 
     if (!mqttConnected)
     {
-        /*
         Log.infoln("MQTT not connected. Caching images to SD.");
         char ifn[30];
         sprintf(ifn, "/imgtemp/cap_%i.jpg", storedImageIndex);
         Log.infoln("Opening %s", ifn);
+        /*
         File file = SD_MMC.open(ifn, FILE_WRITE);
         if (file)
         {
@@ -209,6 +213,7 @@ void initRTSPServer()
     Log.verboseln("Entering...");
 
     Log.infoln("Starting RTSP Server.");
+    rtspServer.setTimeout(1);
     rtspServer.begin();
     rtspServerRunning = true;
 
@@ -220,6 +225,10 @@ void initRTSPServer()
 
 void handleRTSP_loop()
 {
+    String oldMethodName = methodName;
+    methodName = "ProcessAppWifiConnectTasks()";
+    Log.verboseln("Entering...");
+
     uint32_t msecPerFrame = 100;
     static uint32_t lastimage = millis();
     // If we have an active client connection, just service that until gone
@@ -244,10 +253,13 @@ void handleRTSP_loop()
     WiFiClient rtspClient = rtspServer.accept();
     if (rtspClient)
     {
-        Log.infoln("Connecting RTSP Client: %s", rtspClient.remoteIP());
+        Log.infoln("Connecting RTSP Client: %s", rtspClient.remoteIP().toString());
 
         streamer->addSession(&rtspClient);
     }
+
+    Log.verboseln("Exiting...");
+    methodName = oldMethodName;
 }
 
 void ProcessWifiConnectTasks()
@@ -507,6 +519,12 @@ IRAM_ATTR void interruptService()
 {
 }
 
+IRAM_ATTR void mailboxOpened()
+{
+    Log.infoln("Going to sleep now");
+    esp_deep_sleep_start();
+}
+
 void app_setup()
 {
     String oldMethodName = methodName;
@@ -518,9 +536,20 @@ void app_setup()
 
     // Configure Hardware
     Log.infoln("Configuring hardware.");
-    // pinMode(DOORBELL_PIN, INPUT);
-    // attachInterrupt(digitalPinToInterrupt(DOORBELL_PIN), doorbellPressed, FALLING);
+    pinMode(WAKEUP_GPIO, INPUT);
+    attachInterrupt(digitalPinToInterrupt(WAKEUP_GPIO), mailboxOpened, FALLING);
     // create a rising interrupt on GPIO 13
+
+    esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK(WAKEUP_GPIO), ESP_EXT1_WAKEUP_ANY_HIGH);
+
+    /*
+  If there are no external pull-up/downs, tie wakeup pins to inactive level with internal pull-up/downs via RTC IO
+       during deepsleep. However, RTC IO relies on the RTC_PERIPH power domain. Keeping this power domain on will
+       increase some power comsumption. However, if we turn off the RTC_PERIPH domain or if certain chips lack the RTC_PERIPH
+       domain, we will use the HOLD feature to maintain the pull-up and pull-down on the pins during sleep.
+*/
+    rtc_gpio_pulldown_en(WAKEUP_GPIO); // GPIO33 is tie to GND in order to wake up in HIGH
+    rtc_gpio_pullup_dis(WAKEUP_GPIO);  // Disable PULL_UP in order to allow it to wakeup on HIGH
 
     mqttImageSendTimer = xTimerCreate("mqttImageSendTimer", pdMS_TO_TICKS(200), pdTRUE,
                                       (void *)0, reinterpret_cast<TimerCallbackFunction_t>(mqttPublishImage));
@@ -536,7 +565,13 @@ void app_setup()
     }
     root.close();
 
-    xTimerStart(mqttImageSendTimer, pdMS_TO_TICKS(5000));
+    // Turns off the ESP32-CAM white on-board LED (flash) connected to GPIO 4
+    // uncomment if LED is still soldered to GPIO4
+    pinMode(4, OUTPUT);
+    digitalWrite(4, LOW);
+    gpio_hold_en(GPIO_NUM_4);
+
+    //xTimerStart(mqttImageSendTimer, pdMS_TO_TICKS(5000));
 
     Log.verboseln("Exiting...");
     methodName = oldMethodName;

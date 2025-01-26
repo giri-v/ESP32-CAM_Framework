@@ -15,6 +15,8 @@ extern "C"
 #include "freertos/timers.h"
 }
 
+
+
 #ifndef APP_NAME
 #define APP_NAME ESP32FWApp
 #endif
@@ -47,8 +49,7 @@ extern "C"
 
 #include <Update.h>
 
-
-
+#include "driver/rtc_io.h"
 #include "soc/rtc_cntl_reg.h"
 
 OV2640 cam;
@@ -304,8 +305,8 @@ void printDirectory(File dir, int numTabs)
             res += "  ";
             uint32_t tSize = static_cast<uint32_t>(entry.size());
             res += String(tSize);
+            Log.infoln(res.c_str());
         }
-        Log.infoln(res.c_str());
         entry.close();
     }
 }
